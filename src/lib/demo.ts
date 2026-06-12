@@ -206,11 +206,12 @@ function advance(sf: SimFlight, now: number): void {
   sf.packetsTotal = Math.round(sf.bytesTotal / 1400);
 }
 
-export function useDemoFlights(): void {
+export function useDemoFlights(enabled = true): void {
   const setHomeAirports = useFlightsStore((s) => s.setHomeAirports);
   const setFlights = useFlightsStore((s) => s.setFlights);
 
   useEffect(() => {
+    if (!enabled) return;
     setHomeAirports(DEMO_HOME_AIRPORTS);
 
     const flights: SimFlight[] = [];
@@ -262,5 +263,5 @@ export function useDemoFlights(): void {
       clearTimeout(spawnTimer);
       window.removeEventListener('keydown', onKey);
     };
-  }, [setHomeAirports, setFlights]);
+  }, [enabled, setHomeAirports, setFlights]);
 }

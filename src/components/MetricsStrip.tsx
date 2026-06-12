@@ -3,6 +3,7 @@ import { Menu, Map as MapIcon, Globe, Pin, PinOff, Download } from 'lucide-react
 import { useFlightsStore } from '@/store/flights';
 import { useFiltersStore } from '@/store/filters';
 import { useRenderQueue } from '@/hooks/useRenderQueue';
+import { useBackendStore } from '@/store/backend';
 import {
   Select,
   SelectContent,
@@ -105,6 +106,10 @@ export default function MetricsStrip() {
   const toggleFilterDrawer = useFiltersStore((s) => s.toggleFilterDrawer);
   const toggleCardAnchor = useFiltersStore((s) => s.toggleCardAnchor);
   const cardMode = useFiltersStore((s) => (s.viewMode === '2d' ? s.cardAnchor2d : s.cardAnchor3d));
+  const backend = useBackendStore((s) => s.backend);
+  const demo = import.meta.env.VITE_DEMO === '1';
+  const dpi = demo ? 'demo' : backend ? (backend.dpiMode === 'full' ? 'tshark' : 'port-based') : '…';
+  const iface = demo ? 'demo' : backend?.iface ?? '…';
 
   const inRef = useRef<number[]>([]);
   const outRef = useRef<number[]>([]);
@@ -150,16 +155,14 @@ export default function MetricsStrip() {
         {offScreenCount > 0 && <span className="text-zinc-500"> (+{offScreenCount} off-screen)</span>}
       </div>
 
-      <span className="rounded bg-zinc-800 px-1.5 py-0.5 text-[10px] text-zinc-400">DPI: demo</span>
+      <span className="rounded bg-zinc-800 px-1.5 py-0.5 text-[10px] text-zinc-400">DPI: {dpi}</span>
 
-      <Select value="demo">
+      <Select value={iface}>
         <SelectTrigger className="w-[74px]">
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
-          <SelectItem value="demo">demo</SelectItem>
-          <SelectItem value="en0">en0</SelectItem>
-          <SelectItem value="lo0">lo0</SelectItem>
+          <SelectItem value={iface}>{iface}</SelectItem>
         </SelectContent>
       </Select>
 
