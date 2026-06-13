@@ -4,7 +4,7 @@
 // the phase + elapsed time, mirroring the demo's rAF loop.
 
 import { useEffect } from 'react';
-import type { Flight, FlightEvent, ServerMessage } from '@/types';
+import type { ClientMessage, Flight, FlightEvent, ServerMessage } from '@/types';
 import { useFlightsStore } from '@/store/flights';
 import { useConnectionStore } from '@/store/connection';
 import { useBackendStore } from '@/store/backend';
@@ -17,6 +17,20 @@ interface LiveFlight extends Flight {
 const CRUISE_MS = 18000; // visual time to fly out to the cruise hold point
 const CRUISE_TARGET = 0.8;
 const LANDED_TTL_MS = 60_000;
+
+// Control handle — live while the socket is open so the UI (MetricsStrip) can
+// request an interface switch / log export.
+export const liveControl: { send: (m: ClientMessage) => void } = { send: () => {} };
+
+function downloadNdjson(ndjson: string): void {
+  const blob = new Blob([ndjson], { type: 'application/x-ndjson' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `netport-radar-${new Date().toISOString().replace(/[:.]/g, '-')}.ndjson`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
 
 export function useLiveFlights(enabled: boolean): void {
   const setFlights = useFlightsStore((s) => s.setFlights);
@@ -98,6 +112,7 @@ export function useLiveFlights(enabled: boolean): void {
       ws.onopen = () => {
         conn.setReconnecting(false);
         backend.setOnline(true);
+        liveControl.send = (m) => ws?.send(JSON.stringify(m));
       };
       ws.onmessage = (ev) => {
         let msg: ServerMessage;
@@ -115,6 +130,12 @@ export function useLiveFlights(enabled: boolean): void {
           setHomeAirports(msg.homeAirports);
         } else if (msg.type === 'batch') {
           for (const e of msg.events) applyEvent(e, now);
+        } else if (msg.type === 'reset') {
+          flights.length = 0;
+          byId.clear();
+          useFlightsStore.getState().selectFlight(null);
+        } else if (msg.type === 'log') {
+          downloadNdjson(msg.ndjson);
         } else if (msg.type === 'error') {
           backend.setError({ code: msg.code, message: msg.message });
         }
@@ -122,6 +143,7 @@ export function useLiveFlights(enabled: boolean): void {
       ws.onerror = () => ws?.close();
       ws.onclose = () => {
         backend.setOnline(false);
+        liveControl.send = () => {};
         if (closed) return;
         conn.setReconnecting(true);
         retry = setTimeout(connect, 3000);
@@ -131,6 +153,7 @@ export function useLiveFlights(enabled: boolean): void {
 
     return () => {
       closed = true;
+      liveControl.send = () => {};
       cancelAnimationFrame(raf);
       clearTimeout(retry);
       ws?.close();

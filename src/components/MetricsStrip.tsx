@@ -4,6 +4,8 @@ import { useFlightsStore } from '@/store/flights';
 import { useFiltersStore } from '@/store/filters';
 import { useRenderQueue } from '@/hooks/useRenderQueue';
 import { useBackendStore } from '@/store/backend';
+import { Button } from '@/components/ui/button';
+import { liveControl } from '@/lib/live';
 import {
   Select,
   SelectContent,
@@ -110,6 +112,18 @@ export default function MetricsStrip() {
   const demo = import.meta.env.VITE_DEMO === '1';
   const dpi = demo ? 'demo' : backend ? (backend.dpiMode === 'full' ? 'tshark' : 'port-based') : '…';
   const iface = demo ? 'demo' : backend?.iface ?? '…';
+  const online = useBackendStore((s) => s.online);
+  const ifaceOptions = demo ? ['demo'] : backend?.interfaces?.length ? backend.interfaces : [iface];
+  const [pendingIface, setPendingIface] = useState<string | null>(null);
+
+  const doExport = () => (online ? liveControl.send({ type: 'export' }) : exportLog());
+  const doSwitch = (withExport: boolean) => {
+    if (pendingIface) {
+      if (withExport) liveControl.send({ type: 'export' });
+      liveControl.send({ type: 'switch_iface', iface: pendingIface });
+    }
+    setPendingIface(null);
+  };
 
   const inRef = useRef<number[]>([]);
   const outRef = useRef<number[]>([]);
@@ -138,6 +152,7 @@ export default function MetricsStrip() {
   }, []);
 
   return (
+    <>
     <div className="flex items-center gap-3 rounded-lg border border-zinc-800 bg-black/85 px-3 py-1.5 font-mono text-[11px] text-zinc-300 backdrop-blur-sm">
       <div className="flex items-center gap-1.5">
         <span className="text-emerald-400">↓</span>
@@ -157,12 +172,21 @@ export default function MetricsStrip() {
 
       <span className="rounded bg-zinc-800 px-1.5 py-0.5 text-[10px] text-zinc-400">DPI: {dpi}</span>
 
-      <Select value={iface}>
+      <Select
+        value={iface}
+        onValueChange={(v) => {
+          if (v !== iface && !demo) setPendingIface(v);
+        }}
+      >
         <SelectTrigger className="w-[74px]">
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
-          <SelectItem value={iface}>{iface}</SelectItem>
+          {ifaceOptions.map((opt) => (
+            <SelectItem key={opt} value={opt}>
+              {opt}
+            </SelectItem>
+          ))}
         </SelectContent>
       </Select>
 
@@ -179,10 +203,36 @@ export default function MetricsStrip() {
         >
           {cardMode === 'anchored' ? <Pin /> : <PinOff />}
         </StripButton>
-        <StripButton onClick={exportLog} label="Export log">
+        <StripButton onClick={doExport} label="Export log">
           <Download />
         </StripButton>
       </div>
     </div>
+      {pendingIface && (
+        <div
+          className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60"
+          onClick={() => setPendingIface(null)}
+        >
+          <div
+            className="w-[320px] rounded-lg border border-zinc-700 bg-zinc-950 p-4 shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="text-sm font-medium text-zinc-100">Switch to {pendingIface}?</div>
+            <div className="mt-1 text-xs text-zinc-400">This clears the current session.</div>
+            <div className="mt-4 flex justify-end gap-2">
+              <Button size="sm" variant="ghost" onClick={() => setPendingIface(null)}>
+                Cancel
+              </Button>
+              <Button size="sm" variant="outline" onClick={() => doSwitch(true)}>
+                Export &amp; switch
+              </Button>
+              <Button size="sm" onClick={() => doSwitch(false)}>
+                Switch
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
   );
 }

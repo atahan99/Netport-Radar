@@ -17,6 +17,8 @@ import type { BackendInfo, HomeAirport } from '../src/types';
 import { detectBackend, geoLookup, startCapture, type CaptureBackend } from './capture';
 import { FlowTracker } from './flow-tracker';
 import { WsHub } from './ws';
+import { logEvent, exportNdjson, resetLog } from './logger';
+import { startProcessPolling, stopProcessPolling } from './process-names';
 
 const WS_PORT = 8090;
 const HTTP_PORT = 8080;
@@ -155,45 +157,75 @@ function openBrowser(url: string): void {
   }
 }
 
+function getInterfaces(): string[] {
+  const names = new Set<string>();
+  for (const [name, addrs] of Object.entries(os.networkInterfaces())) {
+    if (addrs?.some((a) => !a.internal)) names.add(name);
+  }
+  return [...names];
+}
+
 function main(): void {
   const backend: CaptureBackend = detectBackend();
-  const iface = process.env.NETPORT_IFACE ?? getDefaultInterface();
-  const localIps = getLocalIps();
+  let iface = process.env.NETPORT_IFACE ?? getDefaultInterface();
+  let localIps = getLocalIps();
   const backendInfo: BackendInfo = {
     capture: backend,
     dpiMode: backend === 'tshark' ? 'full' : 'port-based',
     iface,
+    interfaces: getInterfaces(),
   };
   let homeAirports: HomeAirport[] = [];
 
   const ws = new WsHub(WS_PORT, () => ({ homeAirports, backend: backendInfo }));
   const tracker = new FlowTracker({
     getHomeAirports: () => homeAirports,
-    onEvent: (e) => ws.enqueue(e),
+    onEvent: (e) => {
+      ws.enqueue(e);
+      logEvent(e);
+    },
     onSourceIp: () => {},
   });
 
-  void resolvePrimaryHome().then((home) => {
-    homeAirports = [home];
-    ws.homeUpdate(homeAirports);
-    console.log(`[home] ${home.label} (${home.lat.toFixed(2)}, ${home.lng.toFixed(2)})`);
-  });
+  const refreshHome = () =>
+    void resolvePrimaryHome().then((home) => {
+      homeAirports = [home];
+      ws.homeUpdate(homeAirports);
+      console.log(`[home] ${home.label} (${home.lat.toFixed(2)}, ${home.lng.toFixed(2)})`);
+    });
+  refreshHome();
 
-  const proc = startCapture(
-    backend,
-    iface,
-    localIps,
-    (p) => tracker.ingest(p),
-    (msg) => {
-      console.error('[capture]', msg);
-      if (/permission|denied|bpf|root|operation not permitted/i.test(msg)) {
-        ws.error('capture_permission', 'No capture permission — run with sudo (see README).');
-      } else {
-        ws.error('capture_error', msg.slice(0, 200));
-      }
-    },
-  );
-  if (!proc) ws.error('no_backend', 'No capture backend available — install Wireshark (tshark).');
+  const onCaptureError = (msg: string) => {
+    console.error('[capture]', msg);
+    if (/permission|denied|bpf|root|operation not permitted/i.test(msg)) {
+      ws.error('capture_permission', 'No capture permission — run with sudo (see README).');
+    } else {
+      ws.error('capture_error', msg.slice(0, 200));
+    }
+  };
+
+  let captureProc = startCapture(backend, iface, localIps, (p) => tracker.ingest(p), onCaptureError);
+  if (!captureProc) ws.error('no_backend', 'No capture backend available — install Wireshark (tshark).');
+
+  startProcessPolling();
+
+  ws.onClient = (msg, reply) => {
+    if (msg.type === 'export') {
+      reply({ type: 'log', ndjson: exportNdjson() });
+    } else if (msg.type === 'switch_iface' && msg.iface !== iface) {
+      console.log(`[iface] switching to ${msg.iface}`);
+      captureProc?.kill();
+      tracker.clear();
+      resetLog();
+      ws.reset();
+      iface = msg.iface;
+      backendInfo.iface = iface;
+      localIps = getLocalIps();
+      refreshHome();
+      captureProc = startCapture(backend, iface, localIps, (p) => tracker.ingest(p), onCaptureError);
+      ws.broadcastInit();
+    }
+  };
 
   if (process.env.SERVE_DIST) {
     serveDist();
@@ -205,8 +237,9 @@ function main(): void {
   );
 
   const shutdown = () => {
-    proc?.kill();
+    captureProc?.kill();
     tracker.stop();
+    stopProcessPolling();
     ws.stop();
     process.exit(0);
   };

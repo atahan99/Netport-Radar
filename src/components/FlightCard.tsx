@@ -1,6 +1,7 @@
 import { X } from 'lucide-react';
 import { useFlightsStore } from '@/store/flights';
 import { useFiltersStore } from '@/store/filters';
+import { useBackendStore } from '@/store/backend';
 import { mapRef, globeRef } from '@/lib/view-refs';
 import { flightEndpoints } from '@/lib/arc';
 import { interpolateArc } from '@/lib/interpolate';
@@ -66,6 +67,15 @@ export default function FlightCard() {
   const selectFlight = useFlightsStore((s) => s.selectFlight);
   const viewMode = useFiltersStore((s) => s.viewMode);
   const mode = useFiltersStore((s) => (s.viewMode === '2d' ? s.cardAnchor2d : s.cardAnchor3d));
+  const backend = useBackendStore((s) => s.backend);
+  const dpi =
+    import.meta.env.VITE_DEMO === '1'
+      ? 'demo'
+      : backend
+        ? backend.dpiMode === 'full'
+          ? 'tshark'
+          : 'port-based'
+        : '—';
 
   const f = flights.find((x) => x.id === selectedId);
   if (!f) return null;
@@ -73,13 +83,19 @@ export default function FlightCard() {
   const home = homeAirports.find((a) => a.id === f.homeAirportId);
   const pct = Math.round(f.arcProgress * 100);
 
+  // Docked: centered on the bottom row, between the departures/arrivals boards.
+  const dockedStyle: React.CSSProperties = {
+    left: '50%',
+    bottom: 16,
+    transform: 'translateX(-50%)',
+  };
   let style: React.CSSProperties;
   if (mode === 'docked') {
-    style = { right: 16, bottom: 16 };
+    style = dockedStyle;
   } else {
     const sp = anchoredPos(f, home, viewMode === '2d');
     if (!sp) {
-      style = { right: 16, bottom: 16 };
+      style = dockedStyle;
     } else {
       style = {
         left: sp.x,
@@ -120,7 +136,8 @@ export default function FlightCard() {
       </div>
 
       <div className="px-3 py-1.5 text-[11px] text-zinc-500">
-        {f.direction === 'inbound' ? 'Arriving' : 'Departing'}: {home?.label ?? '—'} · DPI: demo · SNI: —
+        {f.direction === 'inbound' ? 'Arriving' : 'Departing'}: {home?.label ?? '—'} · DPI: {dpi} · SNI:{' '}
+        {f.sni ?? '—'}
       </div>
 
       <div className="flex items-center justify-between border-y border-zinc-800 px-3 py-2 font-mono text-[11px] text-zinc-400">

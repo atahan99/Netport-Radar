@@ -177,6 +177,18 @@ export function setPlaneSelected(obj: THREE.Object3D, selected: boolean): void {
   }
 }
 
+// Recolor a plane in place (e.g. when the owning process resolves late and the
+// livery switches from a host hash to the brand color). Keeps the halo.
+export function recolorPlane(obj: THREE.Object3D, color: string, type: AircraftType): void {
+  if (obj.userData.color === color) return;
+  const mat = getMaterial(color, type === 'stealth');
+  const halo = obj.userData.halo as THREE.Mesh | undefined;
+  obj.traverse((c) => {
+    if (c instanceof THREE.Mesh && c !== halo) c.material = mat;
+  });
+  obj.userData.color = color;
+}
+
 // Drop materials whose color is no longer flying (hashed unknown-process colors
 // would otherwise accumulate). Geometries (10 types) are kept.
 export function disposeUnusedMaterials(activeColors: Set<string>): void {

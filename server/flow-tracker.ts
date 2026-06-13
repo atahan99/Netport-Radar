@@ -7,6 +7,7 @@ import type { Flight, FlightEvent, FlightPhase, HomeAirport } from '../src/types
 import { classify } from '../src/lib/classify';
 import { liveryColor } from '../src/lib/livery';
 import { geoLookup, resolveHostname, type RawPacket } from './capture';
+import { lookupProcess } from './process-names';
 
 const DNS_HOLD_MS = 2000;
 const HOLD_IDLE_MS = 5000;
@@ -24,6 +25,7 @@ interface Flow {
   descentAt?: number;
   finRst: boolean;
   hostnameResolved: boolean;
+  processResolved: boolean;
   lastEmittedBytes: number;
   bps: { t: number; bytes: number }[]; // rolling 3s window
 }
@@ -77,6 +79,10 @@ export class FlowTracker {
 
   stop() {
     clearInterval(this.timer);
+  }
+
+  clear(): void {
+    this.flows.clear();
   }
 
   ingest(p: RawPacket): void {
@@ -181,12 +187,14 @@ export class FlowTracker {
         flow.flight.hostname = name;
         flow.hostnameResolved = true;
         flow.flight.hostnameResolved = true;
-        flow.flight.liveryColor = liveryColor(name);
+        // Process livery (brand color) wins; only hash the hostname when the
+        // owning process is still unknown.
+        if (!flow.processResolved) flow.flight.liveryColor = liveryColor(name);
         if (flow.opened) this.opts.onEvent({ event: 'hostname', id: flow.flight.id, hostname: name });
       });
     }
 
-    return {
+    const flow: Flow = {
       flight,
       opened: false,
       createdAt: now,
@@ -194,14 +202,32 @@ export class FlowTracker {
       lastPacketAt: now,
       finRst: false,
       hostnameResolved: false,
+      processResolved: false,
       lastEmittedBytes: -1,
       bps: [],
     };
+    this.resolveProcess(flow);
+    return flow;
   }
 
   private resolveHome(localIp: string): HomeAirport | undefined {
     const homes = this.opts.getHomeAirports();
     return homes.find((h) => h.ip === localIp) ?? homes.find((h) => h.id === 'primary') ?? homes[0];
+  }
+
+  // Look up the owning process (lsof poll catches up within ~2s). Returns true
+  // on the tick it first resolves, so the caller can emit a recolor patch.
+  private resolveProcess(flow: Flow): boolean {
+    if (flow.processResolved) return false;
+    const proc = lookupProcess(flow.flight.srcPort, flow.flight.protocol);
+    if (!proc) return false;
+    const f = flow.flight;
+    f.process = proc.process;
+    f.processRaw = proc.processRaw;
+    f.pid = proc.pid;
+    f.liveryColor = liveryColor(proc.process);
+    flow.processResolved = true;
+    return true;
   }
 
   private setPhase(flow: Flow, phase: FlightPhase): void {
@@ -219,6 +245,20 @@ export class FlowTracker {
       if (flow.closedAt) {
         if (now - flow.closedAt > CLOSED_TTL_MS) this.flows.delete(key);
         continue;
+      }
+
+      // process attribution — late resolution recolors the plane
+      if (this.resolveProcess(flow) && flow.opened) {
+        this.opts.onEvent({
+          event: 'updated',
+          id: f.id,
+          patch: {
+            process: f.process,
+            processRaw: f.processRaw,
+            pid: f.pid,
+            liveryColor: f.liveryColor,
+          },
+        });
       }
 
       // emit `opened` after the DNS hold (taxi)
