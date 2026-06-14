@@ -6,6 +6,7 @@ import { useFiltersStore } from '@/store/filters';
 import { getRenderQueue } from '@/lib/render-queue';
 import { interpolateArc, arcPoints } from '@/lib/interpolate';
 import { flightEndpoints } from '@/lib/arc';
+import { lifecyclePose, type Pose } from '@/lib/lifecycle';
 import { AIRCRAFT_ICONS, AIRCRAFT_SIZE } from '@/lib/icons';
 import { mapRef } from '@/lib/view-refs';
 import type { Flight, HomeAirport } from '@/types';
@@ -38,12 +39,20 @@ function makeMarkerEl(f: Flight): HTMLDivElement {
   return wrap;
 }
 
+function spawnFlare(el: HTMLElement, color: string): void {
+  const ring = document.createElement('div');
+  ring.style.cssText = `position:absolute;left:50%;top:50%;width:10px;height:10px;margin:-5px;border-radius:50%;border:2px solid ${color};pointer-events:none;animation:flare 0.8s ease-out forwards`;
+  el.appendChild(ring);
+  setTimeout(() => ring.remove(), 820);
+}
+
 function updateMarkerEl(
   el: HTMLElement,
   f: Flight,
   heading: number,
   selected: boolean,
   showLabel: boolean,
+  pose: Pose,
 ): void {
   const plane = el.querySelector('[data-role=plane]') as HTMLElement;
   const label = el.querySelector('[data-role=label]') as HTMLElement;
@@ -58,13 +67,15 @@ function updateMarkerEl(
       path.setAttribute('stroke', icon.mode === 'stroke' ? f.liveryColor : 'none');
     }
   }
-  let opacity = 1;
-  if (f.aircraftType === 'stealth') opacity = 0.6;
-  if (f.phase === 'taxi') opacity = 0.85;
-  if (f.phase === 'landed') opacity = 0.3;
+  // one-shot landing flare on touchdown
+  if (el.dataset.phase !== f.phase) {
+    if (f.phase === 'landed' && el.dataset.phase) spawnFlare(el, f.liveryColor);
+    el.dataset.phase = f.phase;
+  }
+  const opacity = f.aircraftType === 'stealth' ? pose.opacity * 0.6 : pose.opacity;
   plane.style.opacity = String(opacity);
   plane.style.filter = selected ? `drop-shadow(0 0 5px ${f.liveryColor})` : 'none';
-  plane.style.transform = selected ? 'scale(1.3)' : 'scale(1)';
+  plane.style.transform = `scale(${(selected ? 1.3 : 1) * pose.scale})`;
   label.style.display = showLabel ? 'block' : 'none';
   label.style.color = selected ? '#fff' : '#d4d4d8';
 }
@@ -124,6 +135,7 @@ export default function MapView() {
       const { mainQueue, dnsQueue } = getRenderQueue(flights, filters);
       const rendered = [...mainQueue, ...dnsQueue];
       const showLabels = map.getZoom() >= 3;
+      const now = performance.now();
 
       const arcFeatures: Feature[] = [];
       const countryAgg = new Map<string, { lng: number; lat: number; count: number }>();
@@ -135,6 +147,13 @@ export default function MapView() {
         const ep = flightEndpoints(home, f);
         const pos = interpolateArc(ep.startLat, ep.startLng, ep.endLat, ep.endLng, f.arcProgress);
 
+        // Lifecycle pose adds an orbit offset (hold-circle / LAN orbit) around the
+        // projected position; the lng offset is widened by 1/cos(lat) so the circle
+        // stays roughly round away from the equator.
+        const pose = lifecyclePose(f, now);
+        const mLat = pos.lat + pose.dLat;
+        const mLng = pos.lng + pose.dLng / Math.max(0.3, Math.cos((pos.lat * Math.PI) / 180));
+
         let m = markers.get(f.id);
         if (!m) {
           const el = makeMarkerEl(f);
@@ -142,12 +161,12 @@ export default function MapView() {
             ev.stopPropagation();
             useFlightsStore.getState().selectFlight(f.id);
           });
-          m = new maplibregl.Marker({ element: el }).setLngLat([pos.lng, pos.lat]).addTo(map);
+          m = new maplibregl.Marker({ element: el }).setLngLat([mLng, mLat]).addTo(map);
           markers.set(f.id, m);
         } else {
-          m.setLngLat([pos.lng, pos.lat]);
+          m.setLngLat([mLng, mLat]);
         }
-        updateMarkerEl(m.getElement(), f, pos.heading, f.id === selectedFlightId, showLabels);
+        updateMarkerEl(m.getElement(), f, pos.heading, f.id === selectedFlightId, showLabels, pose);
         seen.add(f.id);
 
         if (f.phase !== 'taxi' && f.phase !== 'landed') {

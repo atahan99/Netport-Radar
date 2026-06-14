@@ -11,6 +11,7 @@
 import { execSync } from 'child_process';
 import * as os from 'os';
 import http from 'http';
+import net from 'net';
 import { readFileSync, existsSync } from 'fs';
 import { join, extname } from 'path';
 import type { BackendInfo, HomeAirport } from '../src/types';
@@ -165,7 +166,27 @@ function getInterfaces(): string[] {
   return [...names];
 }
 
-function main(): void {
+// Preflight: is `port` free to bind? Used before standing up the WS server so a
+// busy port produces a clear instruction instead of an uncaught EADDRINUSE.
+function isPortFree(port: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    const tester = net
+      .createServer()
+      .once('error', () => resolve(false))
+      .once('listening', () => tester.close(() => resolve(true)))
+      .listen(port);
+  });
+}
+
+async function main(): Promise<void> {
+  if (!(await isPortFree(WS_PORT))) {
+    console.error(
+      `\n[fatal] Port ${WS_PORT} is already in use — another netport-radar may be running.`,
+    );
+    console.error(`        Free it and retry:  lsof -ti tcp:${WS_PORT} | xargs kill\n`);
+    process.exit(1);
+  }
+
   const backend: CaptureBackend = detectBackend();
   let iface = process.env.NETPORT_IFACE ?? getDefaultInterface();
   let localIps = getLocalIps();
@@ -247,4 +268,7 @@ function main(): void {
   process.on('SIGTERM', shutdown);
 }
 
-main();
+main().catch((err) => {
+  console.error('[fatal]', err);
+  process.exit(1);
+});

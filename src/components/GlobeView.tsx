@@ -11,7 +11,10 @@ import {
   setPlaneSelected,
   recolorPlane,
   disposeUnusedMaterials,
+  triggerLandingFlare,
+  updateLandingFlare,
 } from '@/lib/globe-meshes';
+import { lifecyclePose } from '@/lib/lifecycle';
 import { globeRef as sharedGlobeRef, type GlobeApi } from '@/lib/view-refs';
 import type { Flight, HomeAirport } from '@/types';
 
@@ -169,12 +172,18 @@ export default function GlobeView() {
       const p = interpolateArc(ep.startLat, ep.startLng, ep.endLat, ep.endLng, f.arcProgress);
       const km = greatCircleKm(ep.startLat, ep.startLng, ep.endLat, ep.endLng);
       const alt = arcAltitude(km) * Math.sin(f.arcProgress * Math.PI) + 0.006;
-      const c = g.getCoords(p.lat, p.lng, alt);
+      // Lifecycle orbit: offset lat/lng (hold-circle / LAN orbit) by the same
+      // amount on both samples so the heading basis below stays stable.
+      const now = performance.now();
+      const pose = lifecyclePose(f, now);
+      const oLat = pose.dLat;
+      const oLng = pose.dLng / Math.max(0.3, Math.cos((p.lat * Math.PI) / 180));
+      const c = g.getCoords(p.lat + oLat, p.lng + oLng, alt);
       _pos.set(c.x, c.y, c.z);
       o.position.copy(_pos);
       _up.copy(_pos).normalize();
       const np = interpolateArc(ep.startLat, ep.startLng, ep.endLat, ep.endLng, Math.min(1, f.arcProgress + 0.01));
-      const nc = g.getCoords(np.lat, np.lng, alt);
+      const nc = g.getCoords(np.lat + oLat, np.lng + oLng, alt);
       _fwd.set(nc.x, nc.y, nc.z).sub(_pos);
       _proj.copy(_up).multiplyScalar(_fwd.dot(_up));
       _fwd.sub(_proj);
@@ -184,7 +193,15 @@ export default function GlobeView() {
       _m.makeBasis(_right, _up, _fwd);
       o.quaternion.setFromRotationMatrix(_m);
       setPlaneSelected(o, f.id === selRef.current);
+      // Taxi spool / landed shrink layers on top of the selection scale.
+      o.scale.multiplyScalar(pose.scale);
       recolorPlane(o, f.liveryColor, f.aircraftType);
+      // One-shot landing flare on touchdown (descent → landed).
+      if (o.userData.phase !== f.phase) {
+        if (f.phase === 'landed' && o.userData.phase) triggerLandingFlare(o, now);
+        o.userData.phase = f.phase;
+      }
+      updateLandingFlare(o, now);
     },
     [homeById],
   );
@@ -197,6 +214,8 @@ export default function GlobeView() {
     if (f) {
       const ep = flightEndpoints(homeById(f.homeAirportId), f);
       const p = interpolateArc(ep.startLat, ep.startLng, ep.endLat, ep.endLng, f.arcProgress);
+      // Anchor to the base arc point (not the orbit offset) — keeps the leader
+      // line steady, and avoids an impure clock read during render.
       const sc = g.getScreenCoords(p.lat, p.lng, 0.02);
       let visible = true;
       try {

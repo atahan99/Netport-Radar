@@ -1,8 +1,9 @@
+import { lazy, Suspense } from 'react';
+import { Loader2 } from 'lucide-react';
 import { useFiltersStore } from '@/store/filters';
 import { useDemoFlights } from '@/lib/demo';
 import { useLiveFlights } from '@/lib/live';
 import MapView from '@/components/MapView';
-import GlobeView from '@/components/GlobeView';
 import FlightCard from '@/components/FlightCard';
 import FilterPanel from '@/components/FilterPanel';
 import DeparturesBoard from '@/components/DeparturesBoard';
@@ -11,6 +12,12 @@ import RadarHUD from '@/components/RadarHUD';
 import MetricsStrip from '@/components/MetricsStrip';
 import ReconnectingOverlay from '@/components/ReconnectingOverlay';
 import CaptureBanner from '@/components/CaptureBanner';
+import StartupOverlay from '@/components/StartupOverlay';
+import Toasts from '@/components/Toasts';
+
+// Code-split the 3D globe: it pulls in the ~3 MB three.js chunk, which the
+// default 2D map + first paint shouldn't have to carry. Loaded on first switch.
+const GlobeView = lazy(() => import('@/components/GlobeView'));
 
 export default function App() {
   const viewMode = useFiltersStore((s) => s.viewMode);
@@ -22,7 +29,19 @@ export default function App() {
   return (
     <div className="relative h-screen w-screen overflow-hidden bg-black">
       {/* Map / globe fills the screen */}
-      {viewMode === '2d' ? <MapView /> : <GlobeView />}
+      {viewMode === '2d' ? (
+        <MapView />
+      ) : (
+        <Suspense
+          fallback={
+            <div className="absolute inset-0 flex items-center justify-center bg-black">
+              <Loader2 className="h-8 w-8 animate-spin text-zinc-600" />
+            </div>
+          }
+        >
+          <GlobeView />
+        </Suspense>
+      )}
 
       {/* Wordmark behind the HUD */}
       <div className="pointer-events-none absolute inset-x-0 top-5 z-0 text-center text-sm font-semibold tracking-[0.35em] text-zinc-700">
@@ -52,8 +71,14 @@ export default function App() {
       {/* Capture-layer banner (e.g. needs sudo) — WS is up but no packets */}
       <CaptureBanner />
 
+      {/* Transient runtime notifications (interface down, capture hiccups) */}
+      <Toasts />
+
       {/* Reconnecting overlay — shown when the WS to the server drops */}
       <ReconnectingOverlay />
+
+      {/* Blocking recovery screen for fatal startup problems */}
+      <StartupOverlay />
     </div>
   );
 }

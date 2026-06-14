@@ -189,6 +189,52 @@ export function recolorPlane(obj: THREE.Object3D, color: string, type: AircraftT
   obj.userData.color = color;
 }
 
+// ── Landing flare ──────────────────────────────────────────────────────────
+// A brief expanding white ring at touchdown (descent → landed). Each plane gets
+// its own flare mesh + material on demand so opacity can fade independently of
+// the shared selection halo; the material is disposed the moment the flare ends,
+// and landed planes live ~60s (well past the 0.8s flare) so this never leaks.
+const FLARE_MS = 800;
+let flareGeo: THREE.BufferGeometry | null = null;
+function getFlareGeo(): THREE.BufferGeometry {
+  if (!flareGeo) flareGeo = new THREE.RingGeometry(0.55, 0.74, 28).rotateX(-Math.PI / 2);
+  return flareGeo;
+}
+
+export function triggerLandingFlare(obj: THREE.Object3D, now: number): void {
+  obj.userData.flareStart = now;
+}
+
+export function updateLandingFlare(obj: THREE.Object3D, now: number): void {
+  const start = obj.userData.flareStart as number | undefined;
+  if (start === undefined) return;
+  const k = (now - start) / FLARE_MS;
+  let flare = obj.userData.flare as THREE.Mesh | undefined;
+  if (k >= 1) {
+    if (flare) {
+      obj.remove(flare);
+      (flare.material as THREE.Material).dispose();
+      obj.userData.flare = undefined;
+    }
+    obj.userData.flareStart = undefined;
+    return;
+  }
+  if (!flare) {
+    const mat = new THREE.MeshBasicMaterial({
+      color: '#ffffff',
+      transparent: true,
+      opacity: 0.9,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+    });
+    flare = new THREE.Mesh(getFlareGeo(), mat);
+    obj.add(flare);
+    obj.userData.flare = flare;
+  }
+  flare.scale.setScalar(1 + k * 3.5);
+  (flare.material as THREE.MeshBasicMaterial).opacity = 0.9 * (1 - k);
+}
+
 // Drop materials whose color is no longer flying (hashed unknown-process colors
 // would otherwise accumulate). Geometries (10 types) are kept.
 export function disposeUnusedMaterials(activeColors: Set<string>): void {

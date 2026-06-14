@@ -22,6 +22,15 @@ export class WsHub {
     private getInit: () => { homeAirports: HomeAirport[]; backend: BackendInfo },
   ) {
     this.wss = new WebSocketServer({ port });
+    // Belt-and-suspenders: the preflight in index.ts catches a busy port, but
+    // guard the 'error' event too so a late EADDRINUSE can't crash uncaught.
+    this.wss.on('error', (err: NodeJS.ErrnoException) => {
+      if (err.code === 'EADDRINUSE') {
+        console.error(`[fatal] WS port ${port} is already in use.`);
+        process.exit(1);
+      }
+      console.error('[ws]', err.message);
+    });
     this.wss.on('connection', (ws) => {
       const { homeAirports, backend } = this.getInit();
       this.sendTo(ws, { type: 'init', homeAirports, backend });
