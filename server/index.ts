@@ -20,9 +20,7 @@ import { FlowTracker } from './flow-tracker';
 import { WsHub } from './ws';
 import { logEvent, exportNdjson, resetLog } from './logger';
 import { startProcessPolling, stopProcessPolling } from './process-names';
-
-const WS_PORT = 8090;
-const HTTP_PORT = 8080;
+import { WS_PORT, HTTP_PORT, BIND_HOST, IS_LOCAL_BIND, TOKEN } from './config';
 
 function getDefaultInterface(): string {
   try {
@@ -50,6 +48,14 @@ function getLocalIps(): Set<string> {
   return set;
 }
 
+interface IpapiCoResp {
+  latitude: number;
+  longitude: number;
+  city: string;
+  country_code: string;
+  ip: string;
+}
+
 interface IpApiResp {
   status: string;
   country: string;
@@ -60,6 +66,9 @@ interface IpApiResp {
   query: string;
 }
 
+// Home airport from the public IP — still exactly ONE outbound lookup per
+// session, just HTTPS-first now: ipapi.co (HTTPS) → ip-api.com (HTTP-only free
+// tier) → ipify + local geoip-lite (country-accurate). Env override skips all.
 async function resolvePrimaryHome(): Promise<HomeAirport> {
   const { NETPORT_HOME_LAT, NETPORT_HOME_LNG, NETPORT_HOME_LABEL } = process.env;
   if (NETPORT_HOME_LAT && NETPORT_HOME_LNG) {
@@ -72,7 +81,22 @@ async function resolvePrimaryHome(): Promise<HomeAirport> {
       isVpn: false,
     };
   }
-  // ip-api.com geolocates your public IP city-accurately in one call.
+  try {
+    const r = await fetch('https://ipapi.co/json/', { signal: AbortSignal.timeout(4000) });
+    const j = (await r.json()) as IpapiCoResp;
+    if (typeof j.latitude === 'number' && typeof j.longitude === 'number') {
+      return {
+        id: 'primary',
+        label: j.city ? `${j.city}, ${j.country_code}` : (j.country_code ?? 'Home'),
+        lat: j.latitude,
+        lng: j.longitude,
+        ip: j.ip ?? '',
+        isVpn: false,
+      };
+    }
+  } catch {
+    /* fall through */
+  }
   try {
     const r = await fetch(
       'http://ip-api.com/json/?fields=status,country,countryCode,city,lat,lon,query',
@@ -92,7 +116,6 @@ async function resolvePrimaryHome(): Promise<HomeAirport> {
   } catch {
     /* fall through to the local DB */
   }
-  // Fallback: public IP + local geoip-lite (country-accurate).
   try {
     const ip = (
       await (await fetch('https://api.ipify.org', { signal: AbortSignal.timeout(4000) })).text()
@@ -145,7 +168,9 @@ function serveDist(): void {
         res.end('not found');
       }
     })
-    .listen(HTTP_PORT, () => console.log(`[serve] dist on http://localhost:${HTTP_PORT}`));
+    .listen(HTTP_PORT, BIND_HOST, () =>
+      console.log(`[serve] dist on http://localhost:${HTTP_PORT} (bound ${BIND_HOST})`),
+    );
 }
 
 function openBrowser(url: string): void {
@@ -166,16 +191,27 @@ function getInterfaces(): string[] {
   return [...names];
 }
 
-// Preflight: is `port` free to bind? Used before standing up the WS server so a
-// busy port produces a clear instruction instead of an uncaught EADDRINUSE.
+// Preflight: is `port` free on our bind host? Run before standing up the WS
+// server so a busy port produces a clear instruction instead of an uncaught
+// EADDRINUSE.
 function isPortFree(port: number): Promise<boolean> {
   return new Promise((resolve) => {
     const tester = net
       .createServer()
       .once('error', () => resolve(false))
       .once('listening', () => tester.close(() => resolve(true)))
-      .listen(port);
+      .listen(port, BIND_HOST);
   });
+}
+
+// First non-internal IPv4 — only for printing the "open from another device" URL.
+function lanIp(): string | null {
+  for (const addrs of Object.values(os.networkInterfaces())) {
+    for (const a of addrs ?? []) {
+      if (a.family === 'IPv4' && !a.internal) return a.address;
+    }
+  }
+  return null;
 }
 
 async function main(): Promise<void> {
@@ -185,6 +221,13 @@ async function main(): Promise<void> {
     );
     console.error(`        Free it and retry:  lsof -ti tcp:${WS_PORT} | xargs kill\n`);
     process.exit(1);
+  }
+
+  if (!IS_LOCAL_BIND) {
+    console.warn(`\n[security] binding ${BIND_HOST} — devices on your network can reach this server.`);
+    console.warn(`[security] connections require the token below (new one every start).`);
+    const ip = lanIp();
+    if (ip) console.warn(`[security] from another device: http://${ip}:${HTTP_PORT}/?token=${TOKEN}\n`);
   }
 
   const backend: CaptureBackend = detectBackend();
@@ -198,7 +241,10 @@ async function main(): Promise<void> {
   };
   let homeAirports: HomeAirport[] = [];
 
-  const ws = new WsHub(WS_PORT, () => ({ homeAirports, backend: backendInfo }));
+  const ws = new WsHub(WS_PORT, () => ({ homeAirports, backend: backendInfo }), {
+    host: BIND_HOST,
+    token: TOKEN,
+  });
   const tracker = new FlowTracker({
     getHomeAirports: () => homeAirports,
     onEvent: (e) => {
@@ -234,6 +280,11 @@ async function main(): Promise<void> {
     if (msg.type === 'export') {
       reply({ type: 'log', ndjson: exportNdjson() });
     } else if (msg.type === 'switch_iface' && msg.iface !== iface) {
+      // Interface names come over the wire — only accept ones that exist.
+      if (!getInterfaces().includes(msg.iface)) {
+        reply({ type: 'error', code: 'bad_iface', message: `Unknown interface "${msg.iface.slice(0, 32)}"` });
+        return;
+      }
       console.log(`[iface] switching to ${msg.iface}`);
       captureProc?.kill();
       tracker.clear();
@@ -250,7 +301,9 @@ async function main(): Promise<void> {
 
   if (process.env.SERVE_DIST) {
     serveDist();
-    openBrowser(`http://localhost:${HTTP_PORT}`);
+    // Local open works on any bind; the token rides the URL so the page can
+    // hand it to the WS (only set for non-local binds).
+    openBrowser(`http://localhost:${HTTP_PORT}${TOKEN ? `/?token=${TOKEN}` : ''}`);
   }
 
   console.log(

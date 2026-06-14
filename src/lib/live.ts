@@ -109,7 +109,10 @@ export function useLiveFlights(enabled: boolean): void {
     raf = requestAnimationFrame(loop);
 
     const connect = () => {
-      ws = new WebSocket(`ws://${location.hostname}:8090`);
+      // Token only present when the server is bound beyond loopback (it rides
+      // the page URL from the server's printed link).
+      const token = new URLSearchParams(location.search).get('token');
+      ws = new WebSocket(`ws://${location.hostname}:8090${token ? `/?token=${token}` : ''}`);
       ws.onopen = () => {
         conn.setReconnecting(false);
         backend.setOnline(true);

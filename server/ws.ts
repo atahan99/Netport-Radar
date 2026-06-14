@@ -1,7 +1,11 @@
 // server/ws.ts
-// WebSocket hub. Server → client only. Batches FlightEvents every 100ms.
+// WebSocket hub. Streams FlightEvents (batched every 100ms) + a tiny control
+// channel back. Security gate lives here: loopback binds allow only local
+// browser origins (blocks cross-site WebSocket hijack from arbitrary websites —
+// browsers don't apply CORS to WS); non-local binds require the boot token.
 
 import { WebSocketServer, WebSocket } from 'ws';
+import type { IncomingMessage } from 'http';
 import type {
   BackendInfo,
   ClientMessage,
@@ -9,6 +13,41 @@ import type {
   HomeAirport,
   ServerMessage,
 } from '../src/types';
+
+export interface WsHubOpts {
+  host: string;
+  token: string | null; // null = loopback mode (origin check only)
+}
+
+const LOCAL_HOSTNAMES = new Set(['localhost', '127.0.0.1', '::1', '[::1]']);
+const rejectedOrigins = new Set<string>(); // log each offender once
+
+function verifyClient(
+  opts: WsHubOpts,
+  info: { origin?: string; req: IncomingMessage },
+): boolean {
+  if (opts.token !== null) {
+    // Exposed beyond loopback: the token is the only gate. Origin headers are
+    // browser-controlled and can be forged by non-browser LAN clients.
+    const url = new URL(info.req.url ?? '/', 'ws://x');
+    return url.searchParams.get('token') === opts.token;
+  }
+  // Loopback: reachable only from this machine. Remaining threat is a hostile
+  // website in the user's own browser — so require a local Origin. No Origin
+  // header (node scripts, CLI tools) is fine: same-user local processes.
+  const origin = info.origin;
+  if (!origin) return true;
+  try {
+    if (LOCAL_HOSTNAMES.has(new URL(origin).hostname)) return true;
+  } catch {
+    /* malformed origin → reject */
+  }
+  if (!rejectedOrigins.has(origin)) {
+    rejectedOrigins.add(origin);
+    console.warn(`[security] rejected WS connection from origin ${origin}`);
+  }
+  return false;
+}
 
 export class WsHub {
   private wss: WebSocketServer;
@@ -20,8 +59,15 @@ export class WsHub {
   constructor(
     port: number,
     private getInit: () => { homeAirports: HomeAirport[]; backend: BackendInfo },
+    opts: WsHubOpts,
   ) {
-    this.wss = new WebSocketServer({ port });
+    this.wss = new WebSocketServer({
+      port,
+      host: opts.host,
+      maxPayload: 4096, // ClientMessage is tiny; bound hostile frames
+      verifyClient: (info: { origin?: string; req: IncomingMessage }) =>
+        verifyClient(opts, info),
+    });
     // Belt-and-suspenders: the preflight in index.ts catches a busy port, but
     // guard the 'error' event too so a late EADDRINUSE can't crash uncaught.
     this.wss.on('error', (err: NodeJS.ErrnoException) => {
