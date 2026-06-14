@@ -235,8 +235,8 @@ export default function GlobeView() {
         ref={globe}
         width={size.w}
         height={size.h}
-        globeImageUrl="//unpkg.com/three-globe/example/img/earth-dark.jpg"
-        backgroundImageUrl="//unpkg.com/three-globe/example/img/night-sky.png"
+        globeImageUrl="/textures/earth-dark.jpg"
+        backgroundImageUrl="/textures/night-sky.png"
         backgroundColor="#000000"
         atmosphereColor="#3a82ff"
         atmosphereAltitude={0.16}
