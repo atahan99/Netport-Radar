@@ -141,9 +141,13 @@ export function useLiveFlights(enabled: boolean): void {
         } else if (msg.type === 'log') {
           downloadNdjson(msg.ndjson);
         } else if (msg.type === 'error') {
-          // Fatal (blocking overlay) + sudo banner stay sticky in the error
-          // field; transient capture hiccups surface as a self-dismissing toast.
-          if (FATAL_CODES.has(msg.code) || msg.code === 'capture_permission') {
+          // Fatal (blocking overlay) + sticky banner codes hold the error field;
+          // transient capture hiccups surface as a self-dismissing toast.
+          if (
+            FATAL_CODES.has(msg.code) ||
+            msg.code === 'capture_permission' ||
+            msg.code === 'capture_dead'
+          ) {
             backend.setError({ code: msg.code, message: msg.message });
           } else {
             useToastStore.getState().push(msg.message, 'warn');
