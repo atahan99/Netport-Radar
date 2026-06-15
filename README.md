@@ -95,6 +95,20 @@ it and set your location manually:
 sudo NETPORT_HOME_LAT=41.01 NETPORT_HOME_LNG=28.97 NETPORT_HOME_LABEL="Istanbul, TR" npm start
 ```
 
+## Better geo (optional)
+
+By default, destination countries come from the bundled GeoLite2 database
+(country-accurate, no ASN/org). For **city-accurate destinations + real
+ASN/org** on the flight card, point the app at MaxMind GeoLite2 `.mmdb` files
+(free account, you download them — nothing is bundled):
+
+```bash
+sudo NETPORT_MMDB_CITY=~/GeoLite2-City.mmdb \
+     NETPORT_MMDB_ASN=~/GeoLite2-ASN.mmdb npm start
+```
+
+If a file is missing or unreadable, it silently falls back to the bundled DB.
+
 ## Security model
 
 This tool watches your traffic, so its own surface is kept deliberately small

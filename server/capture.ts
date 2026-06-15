@@ -8,6 +8,7 @@ import { existsSync } from 'fs';
 import * as os from 'os';
 import * as dns from 'dns/promises';
 import geoip from 'geoip-lite';
+import { open as openMmdb, type Reader, type CityResponse, type AsnResponse } from 'maxmind';
 import { LRUCache } from 'lru-cache';
 import type { DetectedProtocol, HomeAirport } from '../src/types';
 
@@ -336,10 +337,52 @@ export interface GeoInfo {
   country: string;
   city: string;
   org: string;
+  asn?: string;
 }
 
-// geoip-lite is offline + zero-config but has NO ASN/org data (org = 'Unknown').
+// Optional, off by default: point NETPORT_MMDB_CITY / NETPORT_MMDB_ASN at
+// MaxMind GeoLite2 .mmdb files (free account, downloaded by the user — we bundle
+// nothing) for city-accurate destinations + real org/ASN. Without them we use
+// the bundled geoip-lite (country-accurate, no ASN). Lazy-loaded once.
+let cityReader: Reader<CityResponse> | null = null;
+let asnReader: Reader<AsnResponse> | null = null;
+// Async-load the optional readers at module init — done long before the 2s DNS
+// hold lets any flight need geo, so geoLookup stays synchronous.
+void (async () => {
+  const { NETPORT_MMDB_CITY, NETPORT_MMDB_ASN } = process.env;
+  if (NETPORT_MMDB_CITY) {
+    try {
+      cityReader = await openMmdb<CityResponse>(NETPORT_MMDB_CITY);
+      console.log(`[geo] using MaxMind city DB: ${NETPORT_MMDB_CITY}`);
+    } catch (e) {
+      console.warn('[geo] could not open NETPORT_MMDB_CITY — falling back to geoip-lite:', e);
+    }
+  }
+  if (NETPORT_MMDB_ASN) {
+    try {
+      asnReader = await openMmdb<AsnResponse>(NETPORT_MMDB_ASN);
+    } catch (e) {
+      console.warn('[geo] could not open NETPORT_MMDB_ASN:', e);
+    }
+  }
+})();
+
 export function geoLookup(ip: string): GeoInfo | null {
+  if (cityReader) {
+    const c = cityReader.get(ip);
+    if (c?.location) {
+      const asnNum = asnReader?.get(ip)?.autonomous_system_number;
+      return {
+        lat: c.location.latitude ?? 0,
+        lng: c.location.longitude ?? 0,
+        country: c.country?.iso_code ?? c.registered_country?.iso_code ?? 'XX',
+        city: c.city?.names?.en ?? '',
+        org: asnReader?.get(ip)?.autonomous_system_organization ?? 'Unknown',
+        asn: asnNum ? `AS${asnNum}` : undefined,
+      };
+    }
+    // mmdb miss → fall through to geoip-lite below
+  }
   const geo = geoip.lookup(ip);
   if (!geo) return null;
   return {
