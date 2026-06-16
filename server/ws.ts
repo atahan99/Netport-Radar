@@ -6,6 +6,7 @@
 
 import { WebSocketServer, WebSocket } from 'ws';
 import type { IncomingMessage } from 'http';
+import { WS_FLUSH_MS, WS_MAX_PAYLOAD } from './config';
 import type {
   BackendInfo,
   ClientMessage,
@@ -64,7 +65,7 @@ export class WsHub {
     this.wss = new WebSocketServer({
       port,
       host: opts.host,
-      maxPayload: 4096, // ClientMessage is tiny; bound hostile frames
+      maxPayload: WS_MAX_PAYLOAD, // ClientMessage is tiny; bound hostile frames
       verifyClient: (info: { origin?: string; req: IncomingMessage }) =>
         verifyClient(opts, info),
     });
@@ -91,7 +92,7 @@ export class WsHub {
         this.onClient?.(msg, (reply) => this.sendTo(ws, reply));
       });
     });
-    this.flushTimer = setInterval(() => this.flush(), 100);
+    this.flushTimer = setInterval(() => this.flush(), WS_FLUSH_MS);
   }
 
   enqueue(e: FlightEvent): void {

@@ -1,13 +1,13 @@
 import { useMemo } from 'react';
 import { useFlightsStore } from '@/store/flights';
 import { useFiltersStore } from '@/store/filters';
-import { getRenderQueue } from '@/lib/render-queue';
+import { getRenderQueueMemo } from '@/lib/render-queue';
 
-// Recomputes the render queue whenever the flight set (each frame) or any
-// filter changes. Used by MetricsStrip; the map/globe views compute their
-// own queue imperatively to avoid per-frame React reconciliation.
+// Recomputes the render queue when the flight set (10Hz) or any filter changes.
+// Used by MetricsStrip; the map/globe views call getRenderQueueMemo directly in
+// their own loops, sharing the same single-entry memo.
 export function useRenderQueue() {
   const flights = useFlightsStore((s) => s.flights);
   const filters = useFiltersStore();
-  return useMemo(() => getRenderQueue(flights, filters), [flights, filters]);
+  return useMemo(() => getRenderQueueMemo(flights, filters), [flights, filters]);
 }

@@ -5,6 +5,7 @@
 
 import { execSync } from 'child_process';
 import { normalizeProcess } from '../src/lib/livery';
+import { PROCESS_POLL_MS } from './config';
 
 interface ProcEntry {
   command: string;
@@ -14,10 +15,9 @@ interface ProcEntry {
 let table = new Map<string, ProcEntry>();
 let timer: ReturnType<typeof setInterval> | undefined;
 
-function poll(): void {
-  let out = '';
+function runLsof(): string {
   try {
-    out = execSync('lsof -i -nP +c0 -FpcPn', {
+    return execSync('lsof -i -nP +c0 -FpcPn', {
       encoding: 'utf8',
       maxBuffer: 16 * 1024 * 1024,
       stdio: ['ignore', 'pipe', 'ignore'],
@@ -25,9 +25,13 @@ function poll(): void {
   } catch (e) {
     // lsof often exits non-zero (unreadable handles) but still prints stdout.
     const so = (e as { stdout?: string | Buffer }).stdout;
-    out = typeof so === 'string' ? so : so ? so.toString() : '';
-    if (!out) return;
+    return typeof so === 'string' ? so : so ? so.toString() : '';
   }
+}
+
+function poll(): void {
+  const out = runLsof();
+  if (!out) return;
 
   const next = new Map<string, ProcEntry>();
   let pid = 0;
@@ -58,7 +62,7 @@ function poll(): void {
 
 export function startProcessPolling(): void {
   poll();
-  timer = setInterval(poll, 2000);
+  timer = setInterval(poll, PROCESS_POLL_MS);
 }
 
 export function stopProcessPolling(): void {

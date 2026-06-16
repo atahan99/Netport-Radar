@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { TOAST_TTL_MS } from '@/config';
 
 // Lightweight non-blocking notifications (interface down, transient capture
 // errors). Fatal startup problems use the blocking StartupOverlay instead.
@@ -20,7 +21,7 @@ let nextId = 1;
 
 export const useToastStore = create<ToastStore>((set) => ({
   toasts: [],
-  push: (message, kind = 'info', ttlMs = 5000) => {
+  push: (message, kind = 'info', ttlMs = TOAST_TTL_MS) => {
     let id = 0;
     set((s) => {
       // De-dupe: a repeating capture error shouldn't stack a wall of toasts.

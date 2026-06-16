@@ -3,9 +3,10 @@ import maplibregl from 'maplibre-gl';
 import type { Feature, FeatureCollection } from 'geojson';
 import { useFlightsStore } from '@/store/flights';
 import { useFiltersStore } from '@/store/filters';
-import { getRenderQueue } from '@/lib/render-queue';
+import { getRenderQueueMemo } from '@/lib/render-queue';
 import { interpolateArc, arcPoints } from '@/lib/interpolate';
 import { flightEndpoints } from '@/lib/arc';
+import { liveProgress } from '@/lib/anim';
 import { lifecyclePose, type Pose } from '@/lib/lifecycle';
 import { AIRCRAFT_ICONS, AIRCRAFT_SIZE } from '@/lib/icons';
 import { mapRef } from '@/lib/view-refs';
@@ -133,7 +134,7 @@ export default function MapView() {
       if (!loaded) return;
       const { flights, homeAirports, selectedFlightId } = useFlightsStore.getState();
       const filters = useFiltersStore.getState();
-      const { mainQueue, dnsQueue } = getRenderQueue(flights, filters);
+      const { mainQueue, dnsQueue } = getRenderQueueMemo(flights, filters);
       const rendered = [...mainQueue, ...dnsQueue];
       const showLabels = map.getZoom() >= 3;
       const now = performance.now();
@@ -146,7 +147,8 @@ export default function MapView() {
         const home = homeAirports.find((a) => a.id === f.homeAirportId);
         if (!home) continue;
         const ep = flightEndpoints(home, f);
-        const pos = interpolateArc(ep.startLat, ep.startLng, ep.endLat, ep.endLng, f.arcProgress);
+        const prog = liveProgress(f); // per-frame animated value (not the 10Hz snapshot)
+        const pos = interpolateArc(ep.startLat, ep.startLng, ep.endLat, ep.endLng, prog);
 
         // Lifecycle pose adds an orbit offset (hold-circle / LAN orbit) around the
         // projected position; the lng offset is widened by 1/cos(lat) so the circle
@@ -176,7 +178,7 @@ export default function MapView() {
             properties: { color: f.liveryColor, vpn: home.isVpn },
             geometry: {
               type: 'LineString',
-              coordinates: arcPoints(ep.startLat, ep.startLng, ep.endLat, ep.endLng, f.arcProgress),
+              coordinates: arcPoints(ep.startLat, ep.startLng, ep.endLat, ep.endLng, prog),
             },
           });
         }
@@ -256,15 +258,28 @@ export default function MapView() {
 
     map.on('click', () => useFlightsStore.getState().selectFlight(null));
 
+    // Semantic updates (10Hz worst case): create/remove markers + rebuild home
+    // markers on the rare home change. This makes markers appear immediately on a
+    // store push rather than waiting for the next animation frame.
     const unsubFlights = useFlightsStore.subscribe((st, prev) => {
       if (st.homeAirports !== prev.homeAirports) renderHome(st.homeAirports);
       if (st.flights !== prev.flights || st.selectedFlightId !== prev.selectedFlightId) update();
     });
     const unsubFilters = useFiltersStore.subscribe(() => update());
 
+    // Own per-frame loop: update() reads arcProgressLive each frame for smooth
+    // motion, independent of the now-10Hz store.
+    let frameRaf = 0;
+    const frame = () => {
+      update();
+      frameRaf = requestAnimationFrame(frame);
+    };
+    frameRaf = requestAnimationFrame(frame);
+
     return () => {
       unsubFlights();
       unsubFilters();
+      cancelAnimationFrame(frameRaf);
       mapRef.current = null;
       map.remove();
     };

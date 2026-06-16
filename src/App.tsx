@@ -14,6 +14,7 @@ import ReconnectingOverlay from '@/components/ReconnectingOverlay';
 import CaptureBanner from '@/components/CaptureBanner';
 import StartupOverlay from '@/components/StartupOverlay';
 import Toasts from '@/components/Toasts';
+import ErrorBoundary from '@/components/ErrorBoundary';
 
 // Code-split the 3D globe: it pulls in the ~3 MB three.js chunk, which the
 // default 2D map + first paint shouldn't have to carry. Loaded on first switch.
@@ -28,20 +29,23 @@ export default function App() {
 
   return (
     <div className="relative h-screen w-screen overflow-hidden bg-black">
-      {/* Map / globe fills the screen */}
-      {viewMode === '2d' ? (
-        <MapView />
-      ) : (
-        <Suspense
-          fallback={
-            <div className="absolute inset-0 flex items-center justify-center bg-black">
-              <Loader2 className="h-8 w-8 animate-spin text-zinc-600" />
-            </div>
-          }
-        >
-          <GlobeView />
-        </Suspense>
-      )}
+      {/* Map / globe fills the screen; ErrorBoundary keeps a view crash (e.g. the
+          lazy globe chunk) from white-screening the whole app. */}
+      <ErrorBoundary>
+        {viewMode === '2d' ? (
+          <MapView />
+        ) : (
+          <Suspense
+            fallback={
+              <div className="absolute inset-0 flex items-center justify-center bg-black">
+                <Loader2 className="h-8 w-8 animate-spin text-zinc-600" />
+              </div>
+            }
+          >
+            <GlobeView />
+          </Suspense>
+        )}
+      </ErrorBoundary>
 
       {/* Wordmark behind the HUD */}
       <div className="pointer-events-none absolute inset-x-0 top-5 z-0 text-center text-sm font-semibold tracking-[0.35em] text-zinc-700">

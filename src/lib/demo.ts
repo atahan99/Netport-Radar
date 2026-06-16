@@ -12,6 +12,7 @@ import type {
   HomeAirport,
 } from '@/types';
 import { useFlightsStore } from '@/store/flights';
+import { arcProgressLive, STORE_PUSH_MS } from '@/lib/anim';
 import { useConnectionStore } from '@/store/connection';
 import { liveryColor, normalizeProcess } from './livery';
 
@@ -224,9 +225,28 @@ export function useDemoFlights(enabled = true): void {
     }
 
     let raf = 0;
+    let lastPush = 0;
+    let lastLen = 0;
     const loop = (now: number) => {
-      for (const sf of flights) if (!sf.done) advance(sf, now);
-      setFlights(flights.slice());
+      // Per-frame arcProgress → animation channel; React store pushed at 10Hz or
+      // on a phase/membership change (mirrors the live client).
+      let transition = false;
+      for (const sf of flights) {
+        if (!sf.done) {
+          const prevPhase = sf.phase;
+          advance(sf, now);
+          if (sf.phase !== prevPhase) transition = true;
+        }
+        arcProgressLive.set(sf.id, sf.arcProgress);
+      }
+      if (flights.length !== lastLen) {
+        lastLen = flights.length;
+        transition = true; // spawn / burst
+      }
+      if (transition || now - lastPush >= STORE_PUSH_MS) {
+        lastPush = now;
+        setFlights(flights.slice());
+      }
       raf = requestAnimationFrame(loop);
     };
     raf = requestAnimationFrame(loop);

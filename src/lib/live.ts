@@ -9,15 +9,13 @@ import { useFlightsStore } from '@/store/flights';
 import { useConnectionStore } from '@/store/connection';
 import { useBackendStore, FATAL_CODES } from '@/store/backend';
 import { useToastStore } from '@/store/toasts';
+import { arcProgressLive, STORE_PUSH_MS } from '@/lib/anim';
+import { CRUISE_MS, CRUISE_TARGET, DESCENT_MS, LANDED_TTL_MS } from '@/config';
 
 interface LiveFlight extends Flight {
   phaseStartedAt: number; // client clock (performance.now) when current phase began
   cruiseBase: number; // arcProgress when cruise/descent began (for resume)
 }
-
-const CRUISE_MS = 18000; // visual time to fly out to the cruise hold point
-const CRUISE_TARGET = 0.8;
-const LANDED_TTL_MS = 60_000;
 
 // Control handle — live while the socket is open so the UI (MetricsStrip) can
 // request an interface switch / log export.
@@ -48,6 +46,8 @@ export function useLiveFlights(enabled: boolean): void {
     let raf = 0;
     let retry: ReturnType<typeof setTimeout> | undefined;
     let lastPrune = 0;
+    let lastPush = 0;
+    let pushPending = false; // force an immediate store push (membership/phase change)
     let closed = false;
 
     const applyEvent = (e: FlightEvent, now: number) => {
@@ -55,6 +55,7 @@ export function useLiveFlights(enabled: boolean): void {
         const lf: LiveFlight = { ...e.flight, phaseStartedAt: now, cruiseBase: 0 };
         byId.set(lf.id, lf);
         flights.push(lf);
+        pushPending = true; // new flight → show it without waiting for the 10Hz tick
         return;
       }
       const lf = byId.get(e.id);
@@ -68,6 +69,7 @@ export function useLiveFlights(enabled: boolean): void {
         if (lf.phase !== e.phase) {
           lf.phaseStartedAt = now;
           lf.cruiseBase = lf.arcProgress;
+          pushPending = true; // phase drives boards/card — keep it snappy
         }
         lf.phase = e.phase;
       } else if (e.event === 'closed') {
@@ -76,6 +78,7 @@ export function useLiveFlights(enabled: boolean): void {
         if (lf.phase !== 'landed') {
           lf.phase = 'landed';
           lf.phaseStartedAt = now;
+          pushPending = true;
         }
       }
     };
@@ -86,24 +89,35 @@ export function useLiveFlights(enabled: boolean): void {
       else if (lf.phase === 'cruise')
         lf.arcProgress = Math.min(CRUISE_TARGET, lf.cruiseBase + (dt / CRUISE_MS) * CRUISE_TARGET);
       else if (lf.phase === 'descent')
-        lf.arcProgress = Math.min(1, lf.cruiseBase + (dt / 2000) * (1 - lf.cruiseBase));
+        lf.arcProgress = Math.min(1, lf.cruiseBase + (dt / DESCENT_MS) * (1 - lf.cruiseBase));
       else if (lf.phase === 'landed') lf.arcProgress = 1;
       // hold: keep current arcProgress
     };
 
     const loop = (now: number) => {
-      for (const lf of flights) animate(lf, now);
+      // Per-frame: animate arcProgress into the animation channel (the views read
+      // this every frame for smooth motion). The React store is pushed at 10Hz.
+      for (const lf of flights) {
+        animate(lf, now);
+        arcProgressLive.set(lf.id, lf.arcProgress);
+      }
       if (now - lastPrune > 2000) {
         lastPrune = now;
         for (let i = flights.length - 1; i >= 0; i--) {
           const lf = flights[i];
           if (lf.phase === 'landed' && now - lf.phaseStartedAt > LANDED_TTL_MS) {
             byId.delete(lf.id);
+            arcProgressLive.delete(lf.id);
             flights.splice(i, 1);
+            pushPending = true; // membership change
           }
         }
       }
-      setFlights(flights.slice());
+      if (pushPending || now - lastPush >= STORE_PUSH_MS) {
+        pushPending = false;
+        lastPush = now;
+        setFlights(flights.slice());
+      }
       raf = requestAnimationFrame(loop);
     };
     raf = requestAnimationFrame(loop);

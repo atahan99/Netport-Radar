@@ -5,9 +5,7 @@
 import type { Flight, FlightPhase } from '@/types';
 import type { FilterState } from '@/store/filters';
 import { protocolFamily } from './classify';
-
-const MAIN_CAP = 150;
-const DNS_CAP = 20;
+import { MAIN_CAP, DNS_CAP } from '@/config';
 
 const PHASE_PRIORITY: Record<FlightPhase, number> = {
   descent: 5,
@@ -70,6 +68,21 @@ export interface RenderQueue {
   mainQueue: Flight[];
   dnsQueue: Flight[];
   offScreenCount: number;
+}
+
+// Ref-equality memo. The flight array changes only at the 10Hz store cadence
+// now, but MapView's and GlobeView's per-frame loops (plus MetricsStrip) all
+// want the queue — without this the filter + double-sort would run several times
+// per frame. Single-entry is enough: every caller reads the same two store refs.
+let lastFlights: Flight[] | null = null;
+let lastFilters: FilterState | null = null;
+let lastResult: RenderQueue | null = null;
+export function getRenderQueueMemo(flights: Flight[], filters: FilterState): RenderQueue {
+  if (flights === lastFlights && filters === lastFilters && lastResult) return lastResult;
+  lastFlights = flights;
+  lastFilters = filters;
+  lastResult = getRenderQueue(flights, filters);
+  return lastResult;
 }
 
 export function getRenderQueue(flights: Flight[], filters: FilterState): RenderQueue {

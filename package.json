@@ -14,6 +14,7 @@
     "start": "vite build && SERVE_DIST=1 tsx server/index.ts",
     "typecheck:server": "tsc -p tsconfig.server.json",
     "lint": "eslint .",
+    "check": "tsc -b && tsc -p tsconfig.server.json && eslint .",
     "preview": "vite preview"
   },
   "dependencies": {
