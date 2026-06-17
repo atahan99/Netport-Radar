@@ -25,3 +25,6 @@ plans/
 *.njsproj
 *.sln
 *.sw?
+
+# test coverage
+coverage

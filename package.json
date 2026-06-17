@@ -14,7 +14,9 @@
     "start": "vite build && SERVE_DIST=1 tsx server/index.ts",
     "typecheck:server": "tsc -p tsconfig.server.json",
     "lint": "eslint .",
-    "check": "tsc -b && tsc -p tsconfig.server.json && eslint .",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "check": "tsc -b && tsc -p tsconfig.server.json && eslint . && vitest run",
     "preview": "vite preview"
   },
   "dependencies": {
@@ -48,6 +50,7 @@
     "@types/three": "^0.184.1",
     "@types/ws": "^8.18.1",
     "@vitejs/plugin-react": "^6.0.1",
+    "@vitest/coverage-v8": "^4.1.8",
     "eslint": "^10.3.0",
     "eslint-plugin-react-hooks": "^7.1.1",
     "eslint-plugin-react-refresh": "^0.5.2",
@@ -56,6 +59,7 @@
     "tsx": "^4.22.4",
     "typescript": "~6.0.2",
     "typescript-eslint": "^8.59.2",
-    "vite": "^8.0.12"
+    "vite": "^8.0.12",
+    "vitest": "^4.1.8"
   }
 }
