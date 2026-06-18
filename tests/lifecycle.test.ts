@@ -1,6 +1,9 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { lifecyclePose } from '../src/lib/lifecycle';
+import { reducedMotion } from '../src/lib/motion';
 import { makeFlight } from './helpers';
+
+vi.mock('../src/lib/motion', () => ({ reducedMotion: vi.fn(() => false) }));
 
 describe('lifecyclePose', () => {
   it('landed: static shrink + fade', () => {
@@ -55,8 +58,12 @@ describe('lifecyclePose', () => {
     expect(p1.dLat).not.toBe(p2.dLat);
   });
 
-  // Enabled in Phase 10 once lifecyclePose honors prefers-reduced-motion.
-  it.skip('reduced motion: static poses (Phase 10)', () => {
-    // placeholder — Phase 10 will wire a reducedMotion() flag into lifecyclePose
+  it('reduced motion: static poses (landed keeps its dim, LAN keeps 0.9)', () => {
+    vi.mocked(reducedMotion).mockReturnValue(true);
+    expect(lifecyclePose(makeFlight({ phase: 'hold' }), 1234)).toEqual({ dLat: 0, dLng: 0, scale: 1, opacity: 1 });
+    expect(lifecyclePose(makeFlight({ phase: 'taxi' }), 1234)).toEqual({ dLat: 0, dLng: 0, scale: 1, opacity: 1 });
+    expect(lifecyclePose(makeFlight({ isLan: true, phase: 'cruise' }), 1234)).toEqual({ dLat: 0, dLng: 0, scale: 1, opacity: 0.9 });
+    expect(lifecyclePose(makeFlight({ phase: 'landed' }), 1234)).toEqual({ dLat: 0, dLng: 0, scale: 0.85, opacity: 0.3 });
+    vi.mocked(reducedMotion).mockReturnValue(false);
   });
 });

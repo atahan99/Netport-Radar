@@ -8,6 +8,7 @@ import { interpolateArc, arcPoints } from '@/lib/interpolate';
 import { flightEndpoints } from '@/lib/arc';
 import { liveProgress } from '@/lib/anim';
 import { lifecyclePose, type Pose } from '@/lib/lifecycle';
+import { reducedMotion } from '@/lib/motion';
 import { AIRCRAFT_ICONS, AIRCRAFT_SIZE } from '@/lib/icons';
 import { mapRef } from '@/lib/view-refs';
 import type { Flight, HomeAirport } from '@/types';
@@ -70,7 +71,7 @@ function updateMarkerEl(
   }
   // one-shot landing flare on touchdown
   if (el.dataset.phase !== f.phase) {
-    if (f.phase === 'landed' && el.dataset.phase) spawnFlare(el, f.liveryColor);
+    if (f.phase === 'landed' && el.dataset.phase && !reducedMotion()) spawnFlare(el, f.liveryColor);
     el.dataset.phase = f.phase;
   }
   const opacity = f.aircraftType === 'stealth' ? pose.opacity * 0.6 : pose.opacity;

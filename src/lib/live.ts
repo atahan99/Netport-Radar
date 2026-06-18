@@ -21,6 +21,9 @@ interface LiveFlight extends Flight {
 // request an interface switch / log export.
 export const liveControl: { send: (m: ClientMessage) => void } = { send: () => {} };
 
+// Reconnect-now handle for the ReconnectingOverlay's "Try now" button.
+export const liveReconnect: { now: () => void } = { now: () => {} };
+
 function downloadNdjson(ndjson: string): void {
   const blob = new Blob([ndjson], { type: 'application/x-ndjson' });
   const url = URL.createObjectURL(blob);
@@ -123,6 +126,7 @@ export function useLiveFlights(enabled: boolean): void {
     raf = requestAnimationFrame(loop);
 
     const connect = () => {
+      conn.bumpAttempt(); // count each real attempt (drives the overlay's counter)
       // Token only present when the server is bound beyond loopback (it rides
       // the page URL from the server's printed link).
       const token = new URLSearchParams(location.search).get('token');
@@ -179,9 +183,18 @@ export function useLiveFlights(enabled: boolean): void {
     };
     connect();
 
+    // "Try now" in the reconnecting overlay: skip the 3s backoff and retry now.
+    liveReconnect.now = () => {
+      if (closed) return;
+      clearTimeout(retry);
+      if (ws && ws.readyState !== WebSocket.OPEN) ws.close();
+      connect();
+    };
+
     return () => {
       closed = true;
       liveControl.send = () => {};
+      liveReconnect.now = () => {};
       cancelAnimationFrame(raf);
       clearTimeout(retry);
       ws?.close();

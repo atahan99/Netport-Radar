@@ -19,7 +19,7 @@ export default function Toasts() {
   const dismiss = useToastStore((s) => s.dismiss);
   if (toasts.length === 0) return null;
   return (
-    <div className="pointer-events-none absolute left-1/2 top-16 z-40 flex -translate-x-1/2 flex-col items-center gap-2">
+    <div className="flex flex-col items-center gap-2">
       {toasts.map((t) => {
         const Icon = ICON[t.kind];
         return (

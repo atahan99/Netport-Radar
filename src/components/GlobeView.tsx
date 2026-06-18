@@ -16,6 +16,7 @@ import {
 } from '@/lib/globe-meshes';
 import { lifecyclePose } from '@/lib/lifecycle';
 import { liveProgress } from '@/lib/anim';
+import { reducedMotion } from '@/lib/motion';
 import { globeRef as sharedGlobeRef, type GlobeApi } from '@/lib/view-refs';
 import LeaderLine from '@/components/LeaderLine';
 import type { Flight, HomeAirport } from '@/types';
@@ -89,7 +90,7 @@ export default function GlobeView() {
 
   useEffect(() => {
     const c = globe.current?.controls() as { autoRotate: boolean } | undefined;
-    if (c) c.autoRotate = !selectedId;
+    if (c) c.autoRotate = !selectedId && !reducedMotion();
   }, [selectedId]);
 
   // Plane meshes update every frame (cheap). Trails + dots are throttled to
@@ -220,7 +221,7 @@ export default function GlobeView() {
       recolorPlane(o, f.liveryColor, f.aircraftType);
       // One-shot landing flare on touchdown (descent → landed).
       if (o.userData.phase !== f.phase) {
-        if (f.phase === 'landed' && o.userData.phase) triggerLandingFlare(o, now);
+        if (f.phase === 'landed' && o.userData.phase && !reducedMotion()) triggerLandingFlare(o, now);
         o.userData.phase = f.phase;
       }
       updateLandingFlare(o, now);
@@ -284,7 +285,7 @@ export default function GlobeView() {
             autoRotateSpeed: number;
             addEventListener: (e: string, cb: () => void) => void;
           };
-          c.autoRotate = true;
+          c.autoRotate = !reducedMotion();
           c.autoRotateSpeed = 0.35;
           c.addEventListener('start', () => {
             c.autoRotate = false;
@@ -292,7 +293,7 @@ export default function GlobeView() {
           });
           c.addEventListener('end', () => {
             idleTimer.current = window.setTimeout(() => {
-              if (!useFlightsStore.getState().selectedFlightId) c.autoRotate = true;
+              if (!useFlightsStore.getState().selectedFlightId && !reducedMotion()) c.autoRotate = true;
             }, 2500);
           });
         }}
