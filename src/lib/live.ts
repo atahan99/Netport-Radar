@@ -78,6 +78,7 @@ export function useLiveFlights(enabled: boolean): void {
       } else if (e.event === 'closed') {
         lf.bytesTotal = e.bytesTotal;
         lf.durationMs = e.durationMs;
+        lf.landedAt = Date.now();
         if (lf.phase !== 'landed') {
           lf.phase = 'landed';
           lf.phaseStartedAt = now;

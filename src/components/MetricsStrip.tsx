@@ -160,7 +160,7 @@ export default function MetricsStrip() {
 
   return (
     <>
-    <div className="flex items-center gap-3 rounded-lg border border-zinc-800 bg-black/85 px-3 py-1.5 font-mono text-[11px] text-zinc-300 backdrop-blur-sm">
+    <div className="flex flex-wrap items-center justify-end gap-x-3 gap-y-1 rounded-lg border border-zinc-800 bg-black/85 px-3 py-1.5 font-mono text-[11px] text-zinc-300 backdrop-blur-sm">
       <div className="flex items-center gap-1.5">
         <span className="text-emerald-400">↓</span>
         <canvas ref={inCanvas} width={40} height={16} className="opacity-90" />

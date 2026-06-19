@@ -172,19 +172,19 @@ export default function FlightCard() {
 
       <div className="grid grid-cols-4 gap-1 border-t border-zinc-800 px-3 py-2 text-center font-mono text-[11px]">
         <div>
-          <div className="text-zinc-500">Dur</div>
+          <div className="text-zinc-400">Dur</div>
           <div className="text-zinc-200">{fmtDur(f.durationMs)}</div>
         </div>
         <div>
-          <div className="text-zinc-500">Speed</div>
+          <div className="text-zinc-400">Speed</div>
           <div className="text-zinc-200">{fmtRate(f.bytesPerSec)}</div>
         </div>
         <div>
-          <div className="text-zinc-500">TX</div>
+          <div className="text-zinc-400">TX</div>
           <div className="text-zinc-200">{fmtBytes(f.bytesTx)}</div>
         </div>
         <div>
-          <div className="text-zinc-500">RX</div>
+          <div className="text-zinc-400">RX</div>
           <div className="text-zinc-200">{fmtBytes(f.bytesRx)}</div>
         </div>
       </div>

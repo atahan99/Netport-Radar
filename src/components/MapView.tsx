@@ -9,6 +9,7 @@ import { flightEndpoints } from '@/lib/arc';
 import { liveProgress } from '@/lib/anim';
 import { lifecyclePose, type Pose } from '@/lib/lifecycle';
 import { reducedMotion } from '@/lib/motion';
+import { showTip, hideTip, flightTipText } from '@/lib/tooltip';
 import { AIRCRAFT_ICONS, AIRCRAFT_SIZE } from '@/lib/icons';
 import { mapRef } from '@/lib/view-refs';
 import type { Flight, HomeAirport } from '@/types';
@@ -165,6 +166,8 @@ export default function MapView() {
             ev.stopPropagation();
             useFlightsStore.getState().selectFlight(f.id);
           });
+          el.addEventListener('mousemove', (ev) => showTip(ev.clientX, ev.clientY, flightTipText(f)));
+          el.addEventListener('mouseleave', hideTip);
           m = new maplibregl.Marker({ element: el }).setLngLat([mLng, mLat]).addTo(map);
           markers.set(f.id, m);
         } else {
@@ -258,6 +261,7 @@ export default function MapView() {
     });
 
     map.on('click', () => useFlightsStore.getState().selectFlight(null));
+    map.on('dragstart', hideTip);
 
     // Semantic updates (10Hz worst case): create/remove markers + rebuild home
     // markers on the rare home change. This makes markers appear immediately on a
@@ -281,6 +285,7 @@ export default function MapView() {
       unsubFlights();
       unsubFilters();
       cancelAnimationFrame(frameRaf);
+      hideTip();
       mapRef.current = null;
       map.remove();
     };

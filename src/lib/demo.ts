@@ -186,9 +186,11 @@ function advance(sf: SimFlight, now: number): void {
     sf.phase = 'descent';
     sf.arcProgress = 0.8 + 0.2 * ((t - holdEnd) / sf.descentMs);
   } else if (t < landEnd) {
+    if (!sf.landedAt) sf.landedAt = Date.now();
     sf.phase = 'landed';
     sf.arcProgress = 1;
   } else {
+    if (!sf.landedAt) sf.landedAt = Date.now();
     sf.phase = 'landed';
     sf.arcProgress = 1;
     sf.done = true;
