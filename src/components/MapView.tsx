@@ -10,11 +10,56 @@ import { liveProgress } from '@/lib/anim';
 import { lifecyclePose, type Pose } from '@/lib/lifecycle';
 import { reducedMotion } from '@/lib/motion';
 import { showTip, hideTip, flightTipText } from '@/lib/tooltip';
+import { THEME_BY_ID, type Theme } from '@/lib/themes';
 import { AIRCRAFT_ICONS, AIRCRAFT_SIZE } from '@/lib/icons';
 import { mapRef } from '@/lib/view-refs';
 import type { Flight, HomeAirport } from '@/types';
 
-const STYLE = 'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json';
+type PaintSnap = { prop: string; value: unknown };
+
+// Genuinely recolor the dark-matter vector layers per theme (by layer type), or
+// restore the captured originals when the theme has no recolor (Midnight/Positron).
+function recolorMap(map: maplibregl.Map, snaps: Map<string, PaintSnap>, theme: Theme): void {
+  const rc = theme.mapRecolor;
+  for (const [id, snap] of snaps) {
+    let val = snap.value;
+    if (rc) {
+      if (snap.prop === 'background-color') val = rc.background;
+      else if (snap.prop === 'fill-color') val = id.includes('water') ? rc.water : rc.land;
+      else if (snap.prop === 'line-color') val = rc.line;
+      else if (snap.prop === 'text-color') val = rc.text;
+    }
+    try {
+      map.setPaintProperty(id, snap.prop, val as string);
+    } catch {
+      /* layer/prop gone after a style swap — ignore */
+    }
+  }
+}
+
+function snapshotPaint(map: maplibregl.Map): Map<string, PaintSnap> {
+  const snaps = new Map<string, PaintSnap>();
+  for (const layer of map.getStyle().layers ?? []) {
+    const prop =
+      layer.type === 'background'
+        ? 'background-color'
+        : layer.type === 'fill'
+          ? 'fill-color'
+          : layer.type === 'line'
+            ? 'line-color'
+            : layer.type === 'symbol'
+              ? 'text-color'
+              : null;
+    if (prop) {
+      try {
+        snaps.set(layer.id, { prop, value: map.getPaintProperty(layer.id, prop) });
+      } catch {
+        /* ignore */
+      }
+    }
+  }
+  return snaps;
+}
 
 function iconSvg(f: Flight, size: number): string {
   const icon = AIRCRAFT_ICONS[f.aircraftType];
@@ -106,9 +151,10 @@ export default function MapView() {
 
   useEffect(() => {
     if (!containerRef.current) return;
+    const initialTheme = THEME_BY_ID[useFiltersStore.getState().theme] ?? THEME_BY_ID.midnight;
     const map = new maplibregl.Map({
       container: containerRef.current,
-      style: STYLE,
+      style: initialTheme.mapStyle,
       center: [15, 30],
       zoom: 2,
       // Compact "ⓘ" bottom-right — Carto/OSM tile usage requires attribution.
@@ -120,6 +166,9 @@ export default function MapView() {
     const markers = new Map<string, maplibregl.Marker>();
     const homeMarkers: maplibregl.Marker[] = [];
     let loaded = false;
+    let currentTheme = initialTheme;
+    let lastStyle: string | object = initialTheme.mapStyle;
+    let paintSnaps = new Map<string, PaintSnap>();
 
     function renderHome(homeAirports: HomeAirport[]) {
       for (const m of homeMarkers) m.remove();
@@ -150,7 +199,11 @@ export default function MapView() {
         if (!home) continue;
         const ep = flightEndpoints(home, f);
         const prog = liveProgress(f); // per-frame animated value (not the 10Hz snapshot)
-        const pos = interpolateArc(ep.startLat, ep.startLng, ep.endLat, ep.endLng, prog);
+        // LAN flights orbit the home airport — pin them to home (don't interpolate a
+        // destination arc, which would fly them off to wherever dst landed).
+        const pos = f.isLan
+          ? { lat: home.lat, lng: home.lng, heading: 0 }
+          : interpolateArc(ep.startLat, ep.startLng, ep.endLat, ep.endLng, prog);
 
         // Lifecycle pose adds an orbit offset (hold-circle / LAN orbit) around the
         // projected position; the lng offset is widened by 1/cos(lat) so the circle
@@ -176,7 +229,7 @@ export default function MapView() {
         updateMarkerEl(m.getElement(), f, pos.heading, f.id === selectedFlightId, showLabels, pose);
         seen.add(f.id);
 
-        if (f.phase !== 'taxi' && f.phase !== 'landed') {
+        if (!f.isLan && f.phase !== 'taxi' && f.phase !== 'landed') {
           arcFeatures.push({
             type: 'Feature',
             properties: { color: f.liveryColor, vpn: home.isVpn },
@@ -214,8 +267,10 @@ export default function MapView() {
       destSrc?.setData({ type: 'FeatureCollection', features: destFeatures } as FeatureCollection);
     }
 
-    map.on('load', () => {
-      loaded = true;
+    // The arc/dest overlay must be (re)added on every style — setStyle (theme
+    // swap) drops custom sources/layers. Idempotent.
+    function addOverlay() {
+      if (map.getSource('arcs')) return;
       map.addSource('arcs', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
       map.addSource('dests', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
       map.addLayer({
@@ -250,14 +305,38 @@ export default function MapView() {
           'circle-stroke-width': 1,
         },
       });
-      map.on('click', 'dests', (e) => {
-        const c = e.features?.[0]?.properties?.country;
-        if (typeof c === 'string') useFiltersStore.getState().setIsolatedCountry(c);
-      });
-      map.on('mouseenter', 'dests', () => (map.getCanvas().style.cursor = 'pointer'));
-      map.on('mouseleave', 'dests', () => (map.getCanvas().style.cursor = ''));
+    }
+
+    // dest interactions — registered once (keyed by layer id, survive restyle).
+    map.on('click', 'dests', (e) => {
+      const c = e.features?.[0]?.properties?.country;
+      if (typeof c === 'string') useFiltersStore.getState().setIsolatedCountry(c);
+    });
+    map.on('mouseenter', 'dests', () => (map.getCanvas().style.cursor = 'pointer'));
+    map.on('mouseleave', 'dests', () => (map.getCanvas().style.cursor = ''));
+
+    // style.load fires on the initial load AND after every setStyle (theme swap).
+    map.on('style.load', () => {
+      loaded = true;
+      addOverlay();
+      paintSnaps = snapshotPaint(map);
+      recolorMap(map, paintSnaps, currentTheme);
       renderHome(useFlightsStore.getState().homeAirports);
       update();
+    });
+
+    // Theme: recolor in place when the base style is unchanged, else setStyle
+    // (style.load re-adds the overlay + re-snapshots + recolors).
+    const unsubTheme = useFiltersStore.subscribe((st, prev) => {
+      if (st.theme === prev.theme) return;
+      const t = THEME_BY_ID[st.theme] ?? THEME_BY_ID.midnight;
+      currentTheme = t;
+      if (t.mapStyle !== lastStyle) {
+        lastStyle = t.mapStyle;
+        map.setStyle(t.mapStyle as maplibregl.StyleSpecification);
+      } else {
+        recolorMap(map, paintSnaps, t);
+      }
     });
 
     map.on('click', () => useFlightsStore.getState().selectFlight(null));
@@ -284,6 +363,7 @@ export default function MapView() {
     return () => {
       unsubFlights();
       unsubFilters();
+      unsubTheme();
       cancelAnimationFrame(frameRaf);
       hideTip();
       mapRef.current = null;

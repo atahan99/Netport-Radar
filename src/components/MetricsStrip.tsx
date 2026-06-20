@@ -3,6 +3,7 @@ import { Menu, Map as MapIcon, Globe, Pin, PinOff, Download, CircleHelp } from '
 import { useFlightsStore } from '@/store/flights';
 import { useFiltersStore } from '@/store/filters';
 import { filterChips } from '@/lib/filter-chips';
+import { THEMES, type ThemeName } from '@/lib/themes';
 import { useRenderQueue } from '@/hooks/useRenderQueue';
 import { useBackendStore } from '@/store/backend';
 import { Button } from '@/components/ui/button';
@@ -102,6 +103,8 @@ export default function MetricsStrip() {
   const setViewMode = useFiltersStore((s) => s.setViewMode);
   const toggleFilterDrawer = useFiltersStore((s) => s.toggleFilterDrawer);
   const toggleLegend = useFiltersStore((s) => s.toggleLegend);
+  const theme = useFiltersStore((s) => s.theme);
+  const setTheme = useFiltersStore((s) => s.setTheme);
   const hasActiveFilters = useFiltersStore((s) => filterChips(s).length > 0);
   const toggleCardAnchor = useFiltersStore((s) => s.toggleCardAnchor);
   const cardMode = useFiltersStore((s) => (s.viewMode === '2d' ? s.cardAnchor2d : s.cardAnchor3d));
@@ -192,6 +195,19 @@ export default function MetricsStrip() {
           {ifaceOptions.map((opt) => (
             <SelectItem key={opt} value={opt}>
               {opt}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+
+      <Select value={theme} onValueChange={(v) => setTheme(v as ThemeName)}>
+        <SelectTrigger className="w-[96px]" aria-label="Color theme">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          {THEMES.map((t) => (
+            <SelectItem key={t.id} value={t.id}>
+              {t.label}
             </SelectItem>
           ))}
         </SelectContent>

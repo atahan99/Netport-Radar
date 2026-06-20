@@ -2,6 +2,7 @@ import { lazy, Suspense, useEffect } from 'react';
 import { Loader2 } from 'lucide-react';
 import { useFiltersStore } from '@/store/filters';
 import { useFlightsStore } from '@/store/flights';
+import { applyTheme } from '@/lib/themes';
 import { useDemoFlights } from '@/lib/demo';
 import { useLiveFlights } from '@/lib/live';
 import MapView from '@/components/MapView';
@@ -28,6 +29,12 @@ export default function App() {
   const demo = import.meta.env.VITE_DEMO === '1';
   useDemoFlights(demo);
   useLiveFlights(!demo);
+
+  // Apply the selected color theme (map filter, globe atmosphere, HUD accent, bg).
+  const theme = useFiltersStore((s) => s.theme);
+  useEffect(() => {
+    applyTheme(theme);
+  }, [theme]);
 
   // Esc priority: close the legend, else the filter drawer, else deselect.
   useEffect(() => {
@@ -64,8 +71,11 @@ export default function App() {
         )}
       </ErrorBoundary>
 
-      {/* Wordmark behind the HUD */}
-      <div className="pointer-events-none absolute inset-x-0 top-5 z-0 text-center text-sm font-semibold tracking-[0.35em] text-zinc-700">
+      {/* Wordmark behind the HUD — tinted by the active theme accent */}
+      <div
+        className="pointer-events-none absolute inset-x-0 top-5 z-0 text-center text-sm font-semibold tracking-[0.35em]"
+        style={{ color: 'var(--theme-accent, #3f3f46)', opacity: 0.4 }}
+      >
         NETPORT·RADAR
       </div>
 

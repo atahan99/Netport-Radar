@@ -18,6 +18,7 @@ import { lifecyclePose } from '@/lib/lifecycle';
 import { liveProgress } from '@/lib/anim';
 import { reducedMotion } from '@/lib/motion';
 import { showTip, hideTip, flightTipText } from '@/lib/tooltip';
+import { THEME_BY_ID } from '@/lib/themes';
 import { globeRef as sharedGlobeRef, type GlobeApi } from '@/lib/view-refs';
 import LeaderLine from '@/components/LeaderLine';
 import type { Flight, HomeAirport } from '@/types';
@@ -51,6 +52,8 @@ export default function GlobeView() {
   const homeAirports = useFlightsStore((s) => s.homeAirports);
   const selectedId = useFlightsStore((s) => s.selectedFlightId);
   const filters = useFiltersStore();
+  const themeId = useFiltersStore((s) => s.theme);
+  const theme = THEME_BY_ID[themeId];
   const idleTimer = useRef<number | undefined>(undefined);
 
   // Refs so accessors below can be identity-stable (never trigger layer rebuilds).
@@ -89,6 +92,22 @@ export default function GlobeView() {
     };
   });
 
+  // Theme tint on the earth material (multiplies the texture; planes keep livery).
+  // globeMaterial() exists at runtime but isn't in the react-globe.gl types.
+  // Re-apply on globeImageUrl change too: swapping the texture reloads async and
+  // can clobber the tint, so we set it now and again after the load settles.
+  useEffect(() => {
+    const setTint = () => {
+      const mat = (
+        globe.current as unknown as { globeMaterial?: () => THREE.MeshPhongMaterial }
+      )?.globeMaterial?.();
+      if (mat?.color) mat.color.set(theme.globeTint);
+    };
+    setTint();
+    const t = setTimeout(setTint, 250);
+    return () => clearTimeout(t);
+  }, [theme.globeTint, theme.globeImageUrl]);
+
   useEffect(() => {
     const c = globe.current?.controls() as { autoRotate: boolean } | undefined;
     if (c) c.autoRotate = !selectedId && !reducedMotion();
@@ -114,7 +133,9 @@ export default function GlobeView() {
       const q = getRenderQueueMemo(fl, ft);
       const set = [...q.mainQueue, ...q.dnsQueue];
       setTrailData(
-        set.filter((f) => f.phase === 'cruise' || f.phase === 'hold' || f.phase === 'descent'),
+        set.filter(
+          (f) => !f.isLan && (f.phase === 'cruise' || f.phase === 'hold' || f.phase === 'descent'),
+        ),
       );
       const m = new Map<string, DestDot>();
       for (const f of set) {
@@ -195,10 +216,15 @@ export default function GlobeView() {
   // by customThreeObjectUpdate (so a freshly-created mesh isn't a frame late).
   const updateMesh = useCallback(
     (o: THREE.Object3D, f: Flight, g: GlobeApi, now: number, progress: number) => {
-      const ep = flightEndpoints(homeById(f.homeAirportId), f);
-      const p = interpolateArc(ep.startLat, ep.startLng, ep.endLat, ep.endLng, progress);
-      const km = greatCircleKm(ep.startLat, ep.startLng, ep.endLat, ep.endLng);
-      const alt = arcAltitude(km) * Math.sin(progress * Math.PI) + 0.006;
+      const home = homeById(f.homeAirportId);
+      const ep = flightEndpoints(home, f);
+      // LAN flights orbit home (pinned), never fly out to a destination.
+      const p =
+        f.isLan && home
+          ? { lat: home.lat, lng: home.lng, heading: 0 }
+          : interpolateArc(ep.startLat, ep.startLng, ep.endLat, ep.endLng, progress);
+      const km = f.isLan ? 0 : greatCircleKm(ep.startLat, ep.startLng, ep.endLat, ep.endLng);
+      const alt = f.isLan ? 0.03 : arcAltitude(km) * Math.sin(progress * Math.PI) + 0.006;
       const pose = lifecyclePose(f, now);
       const oLat = pose.dLat;
       const oLng = pose.dLng / Math.max(0.3, Math.cos((p.lat * Math.PI) / 180));
@@ -299,10 +325,10 @@ export default function GlobeView() {
         ref={globe}
         width={size.w}
         height={size.h}
-        globeImageUrl="/textures/earth-dark.jpg"
+        globeImageUrl={theme.globeImageUrl}
         backgroundImageUrl="/textures/night-sky.png"
         backgroundColor="#000000"
-        atmosphereColor="#3a82ff"
+        atmosphereColor={theme.atmosphere}
         atmosphereAltitude={0.16}
         onGlobeReady={() => {
           const g = globe.current;
@@ -312,6 +338,10 @@ export default function GlobeView() {
           const dir = new THREE.DirectionalLight(0xffffff, 0.85);
           dir.position.set(1, 1, 1);
           scene.add(dir);
+          const mat = (
+            g as unknown as { globeMaterial?: () => THREE.MeshPhongMaterial }
+          ).globeMaterial?.();
+          if (mat?.color) mat.color.set(theme.globeTint);
           const primary = homeRef.current.find((a) => a.id === 'primary') ?? homeRef.current[0];
           if (primary) g.pointOfView({ lat: primary.lat, lng: primary.lng, altitude: 2.3 }, 0);
           const c = g.controls() as {
