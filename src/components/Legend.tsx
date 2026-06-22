@@ -2,7 +2,8 @@ import { useEffect } from 'react';
 import { X } from 'lucide-react';
 import { useFiltersStore } from '@/store/filters';
 import { AIRCRAFT_ICONS } from '@/lib/icons';
-import type { AircraftType, FlightPhase } from '@/types';
+import { PHASE_META, PHASE_ORDER } from '@/lib/phase';
+import type { AircraftType } from '@/types';
 
 const AIRCRAFT: Array<[AircraftType, string]> = [
   ['widebody', 'HTTPS'],
@@ -15,14 +16,6 @@ const AIRCRAFT: Array<[AircraftType, string]> = [
   ['ambulance', 'ICMP'],
   ['stealth', 'SSH / Tor'],
   ['broadcast', 'Streaming'],
-];
-
-const PHASES: Array<[FlightPhase, string, string]> = [
-  ['taxi', 'text-blue-400', 'SYN — holding at home'],
-  ['cruise', 'text-emerald-400', 'data flowing'],
-  ['hold', 'text-amber-400', 'idle — circling'],
-  ['descent', 'text-orange-400', 'FIN/RST — closing'],
-  ['landed', 'text-zinc-500', 'closed — fading'],
 ];
 
 function Icon({ type }: { type: AircraftType }) {
@@ -61,7 +54,7 @@ export default function Legend() {
     <>
       <div className="fixed inset-0 z-30" onClick={close} aria-hidden="true" />
       <div
-        className="hud-scroll absolute right-4 top-[4.5rem] z-40 max-h-[80vh] w-72 overflow-y-auto rounded-lg border border-zinc-800 bg-black/90 p-3 text-xs backdrop-blur-sm"
+        className="hud-scroll absolute right-4 top-[4.5rem] z-40 max-h-[80vh] w-72 overflow-y-auto rounded-xl border border-zinc-800 bg-black/90 p-3.5 text-xs backdrop-blur-sm"
         role="dialog"
         aria-label="Legend"
       >
@@ -84,10 +77,12 @@ export default function Legend() {
         </div>
 
         <div className="mb-1 mt-3 font-mono text-[10px] uppercase tracking-wide text-zinc-500">Phases</div>
-        {PHASES.map(([phase, color, meaning]) => (
+        {PHASE_ORDER.map((phase) => (
           <div key={phase} className="flex items-center gap-2 py-0.5">
-            <span className={`w-[72px] font-mono ${color}`}>{phase.toUpperCase()}</span>
-            <span className="text-zinc-500">{meaning}</span>
+            <span className={`w-[72px] font-mono ${PHASE_META[phase].textClass}`}>
+              {PHASE_META[phase].label}
+            </span>
+            <span className="text-zinc-500">{PHASE_META[phase].meaning}</span>
           </div>
         ))}
 

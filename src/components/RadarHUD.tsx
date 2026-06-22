@@ -1,10 +1,27 @@
 import { useEffect, useRef } from 'react';
 import { useFlightsStore } from '@/store/flights';
+import { useFiltersStore } from '@/store/filters';
+import { THEME_BY_ID } from '@/lib/themes';
 
 const S = 120;
 
+function hexToRgb(hex: string): [number, number, number] {
+  const h = hex.replace('#', '');
+  const full = h.length === 3 ? h.split('').map((c) => c + c).join('') : h;
+  const n = parseInt(full, 16);
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+}
+
 export default function RadarHUD() {
   const ref = useRef<HTMLCanvasElement>(null);
+  const accent = useFiltersStore((s) => THEME_BY_ID[s.theme]?.accent ?? '#00ff41');
+
+  // Mutable color the rAF draw loop reads each frame; updated on theme change
+  // without tearing down the animation.
+  const rgb = useRef<[number, number, number]>(hexToRgb(accent));
+  useEffect(() => {
+    rgb.current = hexToRgb(accent);
+  }, [accent]);
 
   useEffect(() => {
     const canvas = ref.current;
@@ -21,15 +38,17 @@ export default function RadarHUD() {
     let raf = 0;
 
     const draw = () => {
+      const [cr, cg, cb] = rgb.current;
+      const col = (a: number) => `rgba(${cr},${cg},${cb},${a})`;
       ctx.clearRect(0, 0, S, S);
-      ctx.strokeStyle = 'rgba(0,255,65,0.15)';
+      ctx.strokeStyle = col(0.15);
       ctx.lineWidth = 1;
       for (const r of [20, 40, 56]) {
         ctx.beginPath();
         ctx.arc(cx, cy, r, 0, Math.PI * 2);
         ctx.stroke();
       }
-      ctx.strokeStyle = 'rgba(0,255,65,0.1)';
+      ctx.strokeStyle = col(0.1);
       ctx.beginPath();
       ctx.moveTo(cx, 6);
       ctx.lineTo(cx, S - 6);
@@ -55,7 +74,7 @@ export default function RadarHUD() {
           const delta = (sweep - angDeg + 360) % 360;
           const alpha = delta < 90 ? 1 - delta / 90 : 0;
           if (alpha > 0.03) {
-            ctx.fillStyle = `rgba(0,255,65,${alpha})`;
+            ctx.fillStyle = col(alpha);
             ctx.beginPath();
             ctx.arc(x, y, 2.5, 0, Math.PI * 2);
             ctx.fill();
@@ -64,7 +83,7 @@ export default function RadarHUD() {
       }
 
       const sr = (sweep * Math.PI) / 180;
-      ctx.strokeStyle = 'rgba(0,255,65,0.6)';
+      ctx.strokeStyle = col(0.6);
       ctx.lineWidth = 1.5;
       ctx.beginPath();
       ctx.moveTo(cx, cy);
@@ -80,7 +99,8 @@ export default function RadarHUD() {
 
   return (
     <div
-      className="relative rounded-lg border border-zinc-800 bg-black/85 p-1 backdrop-blur-sm"
+      aria-hidden="true"
+      className="relative rounded-xl border border-zinc-800 bg-black/85 p-1 backdrop-blur-sm"
       style={{ width: 128 }}
     >
       <canvas ref={ref} style={{ width: S, height: S, display: 'block' }} />

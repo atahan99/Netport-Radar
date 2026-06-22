@@ -163,7 +163,7 @@ export default function MetricsStrip() {
 
   return (
     <>
-    <div className="flex flex-wrap items-center justify-end gap-x-3 gap-y-1 rounded-lg border border-zinc-800 bg-black/85 px-3 py-1.5 font-mono text-[11px] text-zinc-300 backdrop-blur-sm">
+    <div className="flex flex-wrap items-center justify-end gap-x-3 gap-y-1 rounded-xl border border-zinc-800 bg-black/85 px-3 py-2 font-mono text-[11px] text-zinc-300 backdrop-blur-sm">
       <div className="flex items-center gap-1.5">
         <span className="text-emerald-400">↓</span>
         <canvas ref={inCanvas} width={40} height={16} className="opacity-90" />
@@ -245,8 +245,10 @@ export default function MetricsStrip() {
           onClick={() => setPendingIface(null)}
         >
           <div
-            className="w-[320px] rounded-lg border border-zinc-700 bg-zinc-950 p-4 shadow-2xl"
+            className="w-[320px] rounded-xl border border-zinc-700 bg-zinc-950 p-4 shadow-2xl"
             onClick={(e) => e.stopPropagation()}
+            role="dialog"
+            aria-label={`Confirm switch to ${pendingIface}`}
           >
             <div className="text-sm font-medium text-zinc-100">Switch to {pendingIface}?</div>
             <div className="mt-1 text-xs text-zinc-400">This clears the current session.</div>

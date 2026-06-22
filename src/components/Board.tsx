@@ -4,18 +4,18 @@ import { mapRef, globeRef } from '@/lib/view-refs';
 import { flightEndpoints } from '@/lib/arc';
 import { interpolateArc } from '@/lib/interpolate';
 import { liveProgress } from '@/lib/anim';
+import { PHASE_META } from '@/lib/phase';
 import { cn } from '@/lib/utils';
-import type { Flight, FlightPhase, HomeAirport } from '@/types';
-
-const PHASE_STYLE: Record<FlightPhase, string> = {
-  taxi: 'text-blue-400',
-  cruise: 'text-emerald-400',
-  hold: 'text-amber-400',
-  descent: 'text-orange-400',
-  landed: 'text-zinc-500',
-};
+import type { Flight, HomeAirport } from '@/types';
 
 const LANDED_LINGER_MS = 10_000;
+
+// Spoken label for a row — the visible content is terse mono, so spell it out.
+function rowLabel(f: Flight, vpn: boolean): string {
+  const dest = f.hostname || f.dstIp;
+  const proc = f.process !== '—' ? `${f.process}, ` : '';
+  return `${f.id}, ${proc}${dest}, ${f.country}, ${f.phase}${vpn ? ', via VPN' : ''}`;
+}
 
 // Fly the active view to a flight's current position.
 function locate(f: Flight, home: HomeAirport | undefined): void {
@@ -54,12 +54,12 @@ export function Board({ direction, title }: { direction: 'outbound' | 'inbound';
   const homeOf = (f: Flight) => homeAirports.find((a) => a.id === f.homeAirportId);
 
   return (
-    <div className="w-[300px] rounded-lg border border-zinc-800 bg-black/85 backdrop-blur-sm max-[900px]:w-[260px]">
+    <div className="w-[300px] rounded-xl border border-zinc-800 bg-black/85 backdrop-blur-sm max-[900px]:w-[260px]">
       <div className="flex items-center justify-between border-b border-zinc-800 px-3 py-1.5">
         <span className="font-mono text-[11px] font-semibold tracking-wider text-zinc-300">{title}</span>
         <span className="font-mono text-[10px] text-zinc-500">{rows.length}</span>
       </div>
-      <div className="hud-scroll max-h-[168px] overflow-y-auto py-1" role="list">
+      <div className="hud-scroll max-h-[168px] overflow-y-auto py-1" role="listbox" aria-label={title}>
         {rows.length === 0 && (
           <div className="px-3 py-3 text-center font-mono text-[10px] text-zinc-500">
             no {direction} flights
@@ -71,7 +71,9 @@ export function Board({ direction, title }: { direction: 'outbound' | 'inbound';
           return (
             <button
               key={f.id}
-              role="listitem"
+              role="option"
+              aria-selected={selectedId === f.id}
+              aria-label={rowLabel(f, !!home?.isVpn)}
               onClick={() => {
                 select(f.id);
                 locate(f, home);
@@ -86,7 +88,7 @@ export function Board({ direction, title }: { direction: 'outbound' | 'inbound';
                 }
               }}
               className={cn(
-                'flex w-full items-center gap-2 px-3 py-1 text-left font-mono text-[11px] outline-none hover:bg-zinc-900/70 focus-visible:bg-zinc-900 focus-visible:ring-1 focus-visible:ring-zinc-600',
+                'flex w-full items-center gap-2 px-3 py-1.5 text-left font-mono text-[11px] outline-none hover:bg-zinc-900/70 focus-visible:bg-zinc-900 focus-visible:ring-1 focus-visible:ring-zinc-600',
                 selectedId === f.id && 'bg-zinc-900',
                 landed && 'text-zinc-600 line-through opacity-70',
               )}
@@ -98,7 +100,7 @@ export function Board({ direction, title }: { direction: 'outbound' | 'inbound';
                 {f.hostname}
               </span>
               <span className="shrink-0">{f.countryFlag}</span>
-              <span className={cn('w-[54px] shrink-0 text-right', PHASE_STYLE[f.phase])}>
+              <span className={cn('w-[54px] shrink-0 text-right', PHASE_META[f.phase].textClass)}>
                 {f.phase.toUpperCase()}
               </span>
               {home?.isVpn && (

@@ -8,6 +8,7 @@ import { mapRef, globeRef } from '@/lib/view-refs';
 import { flightEndpoints } from '@/lib/arc';
 import { interpolateArc } from '@/lib/interpolate';
 import { protocolBadgeClass, PROTOCOL_LABELS } from '@/lib/classify';
+import { PHASE_META } from '@/lib/phase';
 import { fmtBytes, fmtRate, fmtDur } from '@/lib/format';
 import { cn } from '@/lib/utils';
 import type { Flight, HomeAirport } from '@/types';
@@ -45,6 +46,15 @@ function anchoredPos(f: Flight, home: HomeAirport | undefined, is2d: boolean): S
     /* keep visible */
   }
   return { x: sc.x, y: sc.y, opacity };
+}
+
+function Stat({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <div className="text-[9px] uppercase tracking-wider text-zinc-600">{label}</div>
+      <div className="font-mono text-[11px] tabular-nums text-zinc-200">{value}</div>
+    </div>
+  );
 }
 
 export default function FlightCard() {
@@ -111,85 +121,96 @@ export default function FlightCard() {
   const home = homeAirports.find((a) => a.id === f.homeAirportId);
   const pct = Math.round(liveProgress(f) * 100);
 
+  const phase = PHASE_META[f.phase];
+
   return (
     <div
       ref={cardRef}
-      className="pointer-events-auto absolute z-30 w-[320px] rounded-lg border border-zinc-700 bg-zinc-950/95 shadow-2xl backdrop-blur-sm"
+      role="dialog"
+      aria-label={`Flight ${f.id} — ${f.hostname || f.dstIp}`}
+      className="pointer-events-auto absolute z-30 w-[340px] overflow-hidden rounded-xl border border-zinc-700/80 bg-zinc-950/95 shadow-2xl ring-1 ring-black/40 backdrop-blur-sm"
       style={{ left: '50%', bottom: 16, transform: 'translateX(-50%)' }}
     >
-      <div className="flex items-start justify-between gap-2 border-b border-zinc-800 px-3 py-2">
-        <div className="flex items-center gap-2">
-          <span className="shrink-0 whitespace-nowrap rounded bg-blue-950 px-1.5 py-0.5 font-mono text-xs text-blue-300">
-            {f.id}
-          </span>
-          <span className={cn('shrink-0 whitespace-nowrap rounded px-1.5 py-0.5 text-[11px] leading-none', protocolBadgeClass(f.detectedProtocol))}>
-            {PROTOCOL_LABELS[f.detectedProtocol]}
-          </span>
+      {/* Accent hairline — tinted by the active theme */}
+      <div className="h-0.5 w-full" style={{ background: 'var(--theme-accent, #3b82f6)' }} />
+
+      {/* Header: callsign · protocol · phase · close */}
+      <div className="flex items-center gap-1.5 px-3 pb-2 pt-2.5">
+        <span
+          className="shrink-0 rounded px-1.5 py-0.5 font-mono text-xs font-semibold"
+          style={{
+            color: 'var(--theme-accent, #93c5fd)',
+            backgroundColor: 'color-mix(in oklab, var(--theme-accent, #3b82f6) 16%, transparent)',
+          }}
+        >
+          {f.id}
+        </span>
+        <span className={cn('shrink-0 rounded px-1.5 py-0.5 text-[11px] leading-none', protocolBadgeClass(f.detectedProtocol))}>
+          {PROTOCOL_LABELS[f.detectedProtocol]}
+        </span>
+        <span className={cn('inline-flex shrink-0 items-center gap-1 rounded border px-1.5 py-0.5 text-[10px] font-semibold tracking-wide', phase.badgeClass)}>
+          <span className="h-1.5 w-1.5 rounded-full" style={{ background: phase.hex }} />
+          {phase.label}
+        </span>
+        <button
+          onClick={() => selectFlight(null)}
+          className="ml-auto shrink-0 rounded p-0.5 text-zinc-500 hover:bg-zinc-800 hover:text-zinc-200"
+          aria-label="Close flight detail"
+        >
+          <X className="h-3.5 w-3.5" />
+        </button>
+      </div>
+
+      {/* Hero: destination hostname + org/asn/city */}
+      <div className="px-3 pb-2.5">
+        <div className="truncate text-sm font-medium text-zinc-100" title={f.hostname || f.dstIp}>
+          {f.hostname || f.dstIp}
         </div>
-        <div className="flex items-center gap-2">
-          <div className="text-right text-[11px] text-zinc-400">
-            {f.process} · PID {f.pid}
-          </div>
-          <button
-            onClick={() => selectFlight(null)}
-            className="rounded p-0.5 text-zinc-500 hover:bg-zinc-800 hover:text-zinc-200"
-            aria-label="Close"
-          >
-            <X className="h-3.5 w-3.5" />
-          </button>
+        <div className="mt-0.5 truncate text-[11px] text-zinc-500">
+          {[f.org, f.asn, [f.city, f.country].filter(Boolean).join(', ')].filter(Boolean).join(' · ') || '—'}
         </div>
       </div>
 
-      <div className="px-3 py-1.5 text-[11px] text-zinc-500">
-        {f.direction === 'inbound' ? 'Arriving' : 'Departing'}: {home?.label ?? '—'} · DPI: {dpi} · SNI:{' '}
-        {f.sni ?? '—'}
-      </div>
-
-      <div className="flex items-center justify-between border-y border-zinc-800 px-3 py-2 font-mono text-[11px] text-zinc-400">
-        <div>
-          <div className="text-zinc-200">YOUR PC</div>
-          <div>{f.srcIp}:{f.srcPort}</div>
+      {/* Route: your PC ✈ destination */}
+      <div className="flex items-center gap-2 border-t border-zinc-800/80 px-3 py-2 font-mono text-[11px]">
+        <div className="min-w-0 flex-1">
+          <div className="truncate text-[9px] uppercase tracking-wider text-zinc-600">{home?.label ?? 'Your PC'}</div>
+          <div className="truncate text-zinc-300">{f.srcIp}:{f.srcPort}</div>
         </div>
-        <div className="px-2 text-zinc-600">——✈——</div>
-        <div className="text-right">
-          <div className="text-zinc-200">{f.country} {f.countryFlag}</div>
-          <div>{f.dstIp}:{f.dstPort}</div>
+        <div className="flex shrink-0 flex-col items-center px-1 leading-none text-zinc-600">
+          <span aria-hidden style={{ color: f.liveryColor }}>✈</span>
+          <span className="mt-0.5 text-[9px]">{f.direction === 'inbound' ? '←' : '→'}</span>
         </div>
-      </div>
-
-      <div className="px-3 py-2 text-xs">
-        <div className="truncate text-zinc-300">
-          {f.hostname} · {f.org} · {f.asn}
-        </div>
-        <div className="text-zinc-500">{f.city}, {f.country}</div>
-        <div className="mt-1.5 flex items-center gap-2">
-          <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-zinc-800">
-            <div className="h-full rounded-full" style={{ width: `${pct}%`, background: f.liveryColor }} />
-          </div>
-          <span className="font-mono text-[10px] text-zinc-500">{pct}%</span>
+        <div className="min-w-0 flex-1 text-right">
+          <div className="truncate text-[9px] uppercase tracking-wider text-zinc-600">{f.country} {f.countryFlag}</div>
+          <div className="truncate text-zinc-300">{f.dstIp}:{f.dstPort}</div>
         </div>
       </div>
 
-      <div className="grid grid-cols-4 gap-1 border-t border-zinc-800 px-3 py-2 text-center font-mono text-[11px]">
-        <div>
-          <div className="text-zinc-400">Dur</div>
-          <div className="text-zinc-200">{fmtDur(f.durationMs)}</div>
+      {/* Progress */}
+      <div className="flex items-center gap-2 border-t border-zinc-800/80 px-3 py-2">
+        <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-zinc-800">
+          <div className="h-full rounded-full transition-[width] duration-300" style={{ width: `${pct}%`, background: f.liveryColor }} />
         </div>
-        <div>
-          <div className="text-zinc-400">Speed</div>
-          <div className="text-zinc-200">{fmtRate(f.bytesPerSec)}</div>
-        </div>
-        <div>
-          <div className="text-zinc-400">TX</div>
-          <div className="text-zinc-200">{fmtBytes(f.bytesTx)}</div>
-        </div>
-        <div>
-          <div className="text-zinc-400">RX</div>
-          <div className="text-zinc-200">{fmtBytes(f.bytesRx)}</div>
-        </div>
+        <span className="font-mono text-[10px] tabular-nums text-zinc-400">{pct}%</span>
+        <span className="text-[10px] text-zinc-500">{f.direction === 'inbound' ? 'Arriving' : 'Departing'}</span>
       </div>
-      <div className="px-3 pb-2 font-mono text-[10px] text-zinc-500">
-        Packets: {f.packetsTotal.toLocaleString()} · {f.phase.toUpperCase()}
+
+      {/* Stats */}
+      <div className="grid grid-cols-4 gap-1 border-t border-zinc-800/80 px-3 py-2 text-center">
+        <Stat label="Dur" value={fmtDur(f.durationMs)} />
+        <Stat label="Speed" value={fmtRate(f.bytesPerSec)} />
+        <Stat label="TX" value={fmtBytes(f.bytesTx)} />
+        <Stat label="RX" value={fmtBytes(f.bytesRx)} />
+      </div>
+
+      {/* Footer meta */}
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 border-t border-zinc-800/80 px-3 py-1.5 font-mono text-[10px] text-zinc-600">
+        <span className="text-zinc-400">{f.process}</span>
+        <span>PID {f.pid}</span>
+        <span>· DPI {dpi}</span>
+        {f.sni && <span className="truncate">· SNI {f.sni}</span>}
+        <span>· {f.packetsTotal.toLocaleString()} pkts</span>
       </div>
     </div>
   );
