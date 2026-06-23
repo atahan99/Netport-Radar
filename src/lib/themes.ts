@@ -34,6 +34,12 @@ export interface Theme {
   atmosphere: string; // globe atmosphere glow
   globeTint: string; // multiplies the earth texture (white = untinted)
   globeImageUrl: string; // earth texture
+  // Optional two-color recolor of the 3D globe surface: the earth texture's
+  // luminance is remapped to these land/water colors in the fragment shader,
+  // mirroring the 2D map recolor. Absent = realistic texture (Midnight/Satellite).
+  globeLand?: string;
+  globeWater?: string;
+  globeBorder?: string; // globe country borders (else falls back to mapRecolor.line ?? accent)
   bg: string; // app background
   mapStyle: string | StyleSpecification; // 2D base style
   mapRecolor?: MapRecolor; // optional dark-base recolor (absent = native colors)
@@ -70,6 +76,11 @@ export const THEMES: Theme[] = [
     atmosphere: '#3a82ff',
     globeTint: '#ffffff',
     globeImageUrl: EARTH_DARK,
+    // Vector globe matching the 2D dark-matter map: dark gray-blue land, near-black
+    // ocean, subtle gray borders (the realistic photo read as nearly pure black).
+    globeLand: '#31343d',
+    globeWater: '#0c0d12',
+    globeBorder: '#474c57',
     bg: '#000000',
     mapStyle: DARK,
   },
@@ -80,6 +91,8 @@ export const THEMES: Theme[] = [
     atmosphere: '#00ff66',
     globeTint: '#4dff9e',
     globeImageUrl: EARTH_DARK,
+    globeLand: '#0f8a47',
+    globeWater: '#031c10',
     bg: '#000a04',
     mapStyle: DARK,
     // background = continents (at world zoom the visible "land" is the basemap
@@ -94,6 +107,8 @@ export const THEMES: Theme[] = [
     atmosphere: '#ff2bd6',
     globeTint: '#ff86e2',
     globeImageUrl: EARTH_DARK,
+    globeLand: '#5a1aa8',
+    globeWater: '#0c0024',
     bg: '#0a0016',
     mapStyle: DARK,
     mapRecolor: { background: '#1c0a3a', water: '#0a0018', land: '#24114a', line: '#ff45b0', text: '#46ecff' },
@@ -105,6 +120,8 @@ export const THEMES: Theme[] = [
     atmosphere: '#ffb000',
     globeTint: '#ffcf73',
     globeImageUrl: EARTH_DARK,
+    globeLand: '#7a4a00',
+    globeWater: '#1a0e00',
     bg: '#0a0600',
     mapStyle: DARK,
     mapRecolor: { background: '#2a1800', water: '#0c0600', land: '#352000', line: '#e09600', text: '#ffd166' },
@@ -116,6 +133,8 @@ export const THEMES: Theme[] = [
     atmosphere: '#1e6fff',
     globeTint: '#74a8ff',
     globeImageUrl: EARTH_DARK,
+    globeLand: '#1e5ac0',
+    globeWater: '#02132f',
     bg: '#00040d',
     mapStyle: DARK,
     mapRecolor: { background: '#0c2147', water: '#00163a', land: '#0e2a55', line: '#4a90ff', text: '#9cc4ff' },
@@ -127,6 +146,8 @@ export const THEMES: Theme[] = [
     atmosphere: '#aee3ff',
     globeTint: '#dff0ff',
     globeImageUrl: EARTH_DARK,
+    globeLand: '#dce9f5',
+    globeWater: '#8fb4d6',
     bg: '#0a1118',
     mapStyle: POSITRON, // real light basemap
   },
