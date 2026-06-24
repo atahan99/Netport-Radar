@@ -71,6 +71,16 @@ No packets for 120s → force-closed.
   hostname-hash color; late process resolution recolors markers + meshes in place.
 - **Demo mode**: `VITE_DEMO=1` swaps `useLiveFlights` for `lib/demo.ts`
   (simulated flights; hidden keys R = reconnect overlay, B = burst 200).
+- **Theming** (`lib/themes.ts`, 7 themes): the 2D map recolors dark-matter paint
+  by layer type (`lib/map-recolor.ts`, applied live via a `[theme]` effect — no
+  reload) or swaps base style (Positron/Esri raster). The 3D globe is the vector
+  analogue: themed maps draw a flat ocean sphere + Natural Earth country polygons
+  (`public/geo/`), Satellite/Midnight use a real photo. Phase colors live in
+  `lib/phase.ts` (shared by legend/board/card).
+- **Accessibility**: the canvas is opaque to AT, so `SceneAnnouncer` adds an
+  off-screen description + a polite live region for the selected flight; boards
+  are `listbox`es with spoken labels; `[`/`]` step through flights
+  (`lib/locate.ts` centers the view); `prefers-reduced-motion` is honored.
 
 ## Security model
 
@@ -85,11 +95,18 @@ No packets for 120s → force-closed.
 - Outbound traffic: exactly **one** public-IP geolocation lookup per session
   (HTTPS-first chain; env-overridable) — nothing else leaves the machine.
 - Capture requires root (BPF). The UI process is an ordinary browser tab.
+- **Known ceiling:** the Node process keeps root for its whole lifetime (capture
+  child + WS/HTTP servers + `lsof` + NDJSON export all run privileged). A
+  hardened design would open the capture, then drop to the invoking user
+  (`setuid`/`setgid` via `SUDO_UID`/`SUDO_GID`) and keep a small root supervisor
+  only for `switch_iface`. Mitigated for now by loopback bind + origin/token gate.
 
 ## Conventions
 
 - TypeScript strict everywhere; `src/types.ts` is the single protocol source
   shared by server and client (`server/tsconfig.server.json` compiles both).
 - Frontend imports via `@/` alias; server uses relative `../src/` imports.
-- Verification gate: `tsc -b` + `tsc -p tsconfig.server.json` + build
-  (becoming `npm run check` with lint + tests in later phases).
+- Verification gate: `npm run check` = `tsc -b` + `tsc -p
+  tsconfig.server.json` + eslint + vitest (104 tests; pure logic in `tests/*.ts`,
+  component tests in `tests/*.test.tsx` on happy-dom). Enforced in CI
+  (`.github/workflows/ci.yml`).

@@ -1,12 +1,9 @@
 import { useEffect, useState } from 'react';
 import { useFlightsStore } from '@/store/flights';
-import { mapRef, globeRef } from '@/lib/view-refs';
-import { flightEndpoints } from '@/lib/arc';
-import { interpolateArc } from '@/lib/interpolate';
-import { liveProgress } from '@/lib/anim';
+import { locateFlight } from '@/lib/locate';
 import { PHASE_META } from '@/lib/phase';
 import { cn } from '@/lib/utils';
-import type { Flight, HomeAirport } from '@/types';
+import type { Flight } from '@/types';
 
 const LANDED_LINGER_MS = 10_000;
 
@@ -15,18 +12,6 @@ function rowLabel(f: Flight, vpn: boolean): string {
   const dest = f.hostname || f.dstIp;
   const proc = f.process !== '—' ? `${f.process}, ` : '';
   return `${f.id}, ${proc}${dest}, ${f.country}, ${f.phase}${vpn ? ', via VPN' : ''}`;
-}
-
-// Fly the active view to a flight's current position.
-function locate(f: Flight, home: HomeAirport | undefined): void {
-  const ep = flightEndpoints(home, f);
-  const p = interpolateArc(ep.startLat, ep.startLng, ep.endLat, ep.endLng, liveProgress(f));
-  const map = mapRef.current;
-  if (map) {
-    map.flyTo({ center: [p.lng, p.lat], zoom: Math.max(map.getZoom(), 3.5), duration: 600 });
-    return;
-  }
-  globeRef.current?.pointOfView({ lat: p.lat, lng: p.lng, altitude: 1.6 }, 600);
 }
 
 export function Board({ direction, title }: { direction: 'outbound' | 'inbound'; title: string }) {
@@ -76,7 +61,7 @@ export function Board({ direction, title }: { direction: 'outbound' | 'inbound';
               aria-label={rowLabel(f, !!home?.isVpn)}
               onClick={() => {
                 select(f.id);
-                locate(f, home);
+                locateFlight(f, home);
               }}
               onKeyDown={(e) => {
                 if (e.key === 'ArrowDown') {

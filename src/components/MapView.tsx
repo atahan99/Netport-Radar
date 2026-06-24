@@ -11,6 +11,7 @@ import { lifecyclePose, type Pose } from '@/lib/lifecycle';
 import { reducedMotion } from '@/lib/motion';
 import { showTip, hideTip, flightTipText } from '@/lib/tooltip';
 import { THEME_BY_ID, type Theme } from '@/lib/themes';
+import { recolorValue } from '@/lib/map-recolor';
 import { AIRCRAFT_ICONS, AIRCRAFT_SIZE } from '@/lib/icons';
 import { mapRef } from '@/lib/view-refs';
 import type { Flight, HomeAirport } from '@/types';
@@ -20,15 +21,8 @@ type PaintSnap = { prop: string; value: unknown };
 // Genuinely recolor the dark-matter vector layers per theme (by layer type), or
 // restore the captured originals when the theme has no recolor (Midnight/Positron).
 function recolorMap(map: maplibregl.Map, snaps: Map<string, PaintSnap>, theme: Theme): void {
-  const rc = theme.mapRecolor;
   for (const [id, snap] of snaps) {
-    let val = snap.value;
-    if (rc) {
-      if (snap.prop === 'background-color') val = rc.background;
-      else if (snap.prop === 'fill-color') val = id.includes('water') ? rc.water : rc.land;
-      else if (snap.prop === 'line-color') val = rc.line;
-      else if (snap.prop === 'text-color') val = rc.text;
-    }
+    const val = recolorValue(snap.prop, id, theme.mapRecolor) ?? snap.value;
     try {
       map.setPaintProperty(id, snap.prop, val as string);
     } catch {

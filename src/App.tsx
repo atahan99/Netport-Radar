@@ -3,6 +3,8 @@ import { Loader2 } from 'lucide-react';
 import { useFiltersStore } from '@/store/filters';
 import { useFlightsStore } from '@/store/flights';
 import { applyTheme } from '@/lib/themes';
+import { getRenderQueueMemo } from '@/lib/render-queue';
+import { locateFlight } from '@/lib/locate';
 import { useDemoFlights } from '@/lib/demo';
 import { useLiveFlights } from '@/lib/live';
 import MapView from '@/components/MapView';
@@ -24,6 +26,25 @@ import SceneAnnouncer from '@/components/SceneAnnouncer';
 // default 2D map + first paint shouldn't have to carry. Loaded on first switch.
 const GlobeView = lazy(() => import('@/components/GlobeView'));
 
+// Step selection through the on-screen flights — a keyboard alternative to
+// clicking individual planes on the canvas. The new selection is announced by
+// SceneAnnouncer's live region and centered in the active view.
+function cycleFlight(dir: 1 | -1): void {
+  const fs = useFlightsStore.getState();
+  const { mainQueue, dnsQueue } = getRenderQueueMemo(fs.flights, useFiltersStore.getState());
+  const list = [...mainQueue, ...dnsQueue];
+  if (list.length === 0) return;
+  const idx = list.findIndex((f) => f.id === fs.selectedFlightId);
+  const nextIdx =
+    idx < 0 ? (dir > 0 ? 0 : list.length - 1) : (idx + dir + list.length) % list.length;
+  const next = list[nextIdx];
+  fs.selectFlight(next.id);
+  locateFlight(
+    next,
+    fs.homeAirports.find((a) => a.id === next.homeAirportId),
+  );
+}
+
 export default function App() {
   const viewMode = useFiltersStore((s) => s.viewMode);
   // Live capture by default; demo generator behind VITE_DEMO=1 for offline UI work.
@@ -40,12 +61,24 @@ export default function App() {
   // Esc priority: close the legend, else the filter drawer, else deselect.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key !== 'Escape') return;
-      const f = useFiltersStore.getState();
-      if (f.legendOpen) f.setLegend(false);
-      else if (f.filterDrawerOpen) f.toggleFilterDrawer();
-      else if (useFlightsStore.getState().selectedFlightId) {
-        useFlightsStore.getState().selectFlight(null);
+      if (e.key === 'Escape') {
+        const f = useFiltersStore.getState();
+        if (f.legendOpen) f.setLegend(false);
+        else if (f.filterDrawerOpen) f.toggleFilterDrawer();
+        else if (useFlightsStore.getState().selectedFlightId) {
+          useFlightsStore.getState().selectFlight(null);
+        }
+        return;
+      }
+      // [ / ] step backward / forward through the on-screen flights — keyboard
+      // access to planes (the canvas markers aren't individually focusable).
+      if (e.key === '[' || e.key === ']') {
+        const el = document.activeElement as HTMLElement | null;
+        if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)) {
+          return; // don't hijack typing in the app-search field
+        }
+        e.preventDefault();
+        cycleFlight(e.key === ']' ? 1 : -1);
       }
     };
     window.addEventListener('keydown', onKey);
