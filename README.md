@@ -215,7 +215,10 @@ gate: `npm run check` (tsc ×2 + eslint + vitest), enforced by GitHub Actions
 ([.github/workflows/ci.yml](.github/workflows/ci.yml)). Electron was dropped —
 the app ships as `sudo npm start`.
 
-One known ceiling: the capture process stays root for its whole lifetime
-(privilege separation / drop-after-capture would shrink the blast radius of any
-server-side vuln); the server is loopback-bound with origin/token gating, so the
-practical risk for local use is low.
+**Privilege separation:** when started via `sudo` on macOS/Linux, the root-only
+work (spawning `tshark`/`tcpdump` + polling `lsof`) runs in a small **broker
+child**, and the main process — the network-facing WS + HTTP servers and the
+flow tracker — **drops to your user** (`SUDO_UID`/`SUDO_GID`) right after. A bug
+in the network-facing code is then unprivileged, not root. Set
+`NETPORT_NO_PRIVDROP=1` to keep the old single-root-process behavior; on a
+non-`sudo` run (e.g. ChmodBPF) or Windows it runs inline, unchanged.
