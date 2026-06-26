@@ -10,10 +10,14 @@ lerna-debug.log*
 node_modules
 dist
 dist-ssr
+dist.root-backup
 *.local
 
 # Local-only planning docs
 plans/
+
+# Claude Code local config
+.claude/
 
 # Editor directories and files
 .vscode/*
@@ -28,6 +32,7 @@ plans/
 
 # test coverage
 coverage
+test-results
 
 # Runtime flight-log exports written to the repo root by the app
 *.ndjson
