@@ -8,15 +8,22 @@
 // the only thing that leaves the machine. Set NETPORT_HOME_LAT / NETPORT_HOME_LNG
 // (+ NETPORT_HOME_LABEL) to skip it entirely.
 
-import { execSync } from 'child_process';
+import { execSync, type ChildProcess } from 'child_process';
 import * as os from 'os';
 import http from 'http';
 import net from 'net';
 import { lookup } from 'dns/promises';
-import { readFileSync, existsSync } from 'fs';
+import { readFileSync, writeFileSync, existsSync } from 'fs';
 import { join, extname } from 'path';
 import type { BackendInfo, HomeAirport } from '../src/types';
-import { detectBackend, geoLookup, startCapture, type CaptureBackend } from './capture';
+import {
+  detectBackend,
+  detectHomeAirports,
+  geoLookup,
+  haversineKm,
+  startCapture,
+  type CaptureBackend,
+} from './capture';
 import { FlowTracker } from './flow-tracker';
 import { WsHub } from './ws';
 import { logEvent, exportNdjson, resetLog } from './logger';
@@ -259,35 +266,102 @@ async function main(): Promise<void> {
     host: BIND_HOST,
     token: TOKEN,
   });
+  // Capturing on a VPN tunnel interface → the home airport is a VPN exit.
+  const VPN_IFACE = /^(utun|tun|tap|wg|ppp)/i;
+  let primaryHome: HomeAirport | null = null;
+  let lastHomeSig = '';
+  const sourceIpHits = new Map<string, number>();
+
+  // Single source of truth for homeAirports: the ip-api primary, VPN-flagged if
+  // we're on a tunnel interface, plus any extra clusters of observed *public*
+  // source IPs (multi-homed hosts). Behind home NAT the source IP is private →
+  // geoLookup returns null → no extras, exactly as before. Only broadcasts when
+  // the set actually changes (the 10s timer is otherwise a no-op).
+  function publishHomes(): void {
+    if (!primaryHome) return;
+    const homes: HomeAirport[] = [{ ...primaryHome }];
+    if (VPN_IFACE.test(iface)) {
+      homes[0].isVpn = true;
+      if (!/\(VPN\)$/.test(homes[0].label)) homes[0].label += ' (VPN)';
+    }
+    for (const d of detectHomeAirports([...sourceIpHits.keys()])) {
+      if (homes.length >= 3) break;
+      if (haversineKm(d.lat, d.lng, homes[0].lat, homes[0].lng) > 100) {
+        const label = /\(VPN\)$/.test(d.label) ? d.label : `${d.label} (VPN)`;
+        homes.push({ ...d, id: `vpn-${homes.length}`, isVpn: true, label });
+      }
+    }
+    homeAirports = homes;
+    const sig = homes.map((h) => `${h.id}:${h.lat.toFixed(3)},${h.lng.toFixed(3)},${h.isVpn}`).join('|');
+    if (sig === lastHomeSig) return;
+    lastHomeSig = sig;
+    ws.homeUpdate(homeAirports);
+  }
+
   const tracker = new FlowTracker({
     getHomeAirports: () => homeAirports,
     onEvent: (e) => {
       ws.enqueue(e);
       logEvent(e);
     },
-    onSourceIp: () => {},
+    onSourceIp: (ip) => sourceIpHits.set(ip, (sourceIpHits.get(ip) ?? 0) + 1),
     selfProbeIps,
   });
 
   const refreshHome = () =>
     void resolvePrimaryHome().then((home) => {
-      homeAirports = [home];
-      ws.homeUpdate(homeAirports);
+      primaryHome = home;
+      publishHomes();
       console.log(`[home] ${home.label} (${home.lat.toFixed(2)}, ${home.lng.toFixed(2)})`);
     });
   refreshHome();
+  // Re-cluster periodically so a newly-seen public source IP can add a VPN exit.
+  const clusterTimer = setInterval(publishHomes, 10_000);
+
+  let captureProc: ChildProcess | null = null;
+  let shuttingDown = false;
+  let permissionDenied = false;
+  let restartCount = 0;
+  let lastRestart = 0;
 
   const onCaptureError = (msg: string) => {
     console.error('[capture]', msg);
     if (/permission|denied|bpf|root|operation not permitted/i.test(msg)) {
+      permissionDenied = true; // a restart won't fix this — let the banner stand
       ws.error('capture_permission', 'No capture permission — run with sudo (see README).');
     } else {
       ws.error('capture_error', msg.slice(0, 200));
     }
   };
 
-  let captureProc = startCapture(backend, iface, localIps, (p) => tracker.ingest(p), onCaptureError);
-  if (!captureProc) ws.error('no_backend', 'No capture backend available — install Wireshark (tshark).');
+  // Supervisor: a capture process that dies (laptop sleep/wake, interface flap)
+  // is restarted once; if it dies again within 30s it's declared dead. An
+  // intentional kill (interface switch / shutdown) is distinguished by proc
+  // identity — the superseded proc's exit handler sees proc !== captureProc.
+  function spawnCapture(): void {
+    const proc = startCapture(backend, iface, localIps, (p) => tracker.ingest(p), onCaptureError);
+    captureProc = proc;
+    if (!proc) {
+      ws.error('no_backend', 'No capture backend available — install Wireshark (tshark).');
+      return;
+    }
+    proc.on('exit', () => {
+      if (proc !== captureProc || shuttingDown || permissionDenied) return;
+      const now = Date.now();
+      const recent = now - lastRestart < 30_000;
+      if (recent && restartCount >= 1) {
+        ws.error('capture_dead', 'Capture keeps dying — check permissions or the interface (see README).');
+        return;
+      }
+      restartCount = recent ? restartCount + 1 : 1;
+      lastRestart = now;
+      ws.error('capture_error', 'Capture process exited — restarting…');
+      setTimeout(() => {
+        if (proc === captureProc && !shuttingDown && !permissionDenied) spawnCapture();
+      }, 2000);
+    });
+  }
+  spawnCapture();
 
   startProcessPolling();
 
@@ -301,15 +375,18 @@ async function main(): Promise<void> {
         return;
       }
       console.log(`[iface] switching to ${msg.iface}`);
-      captureProc?.kill();
+      captureProc?.kill(); // its exit handler no-ops once spawnCapture reassigns captureProc
       tracker.clear();
       resetLog();
       ws.reset();
       iface = msg.iface;
       backendInfo.iface = iface;
       localIps = getLocalIps();
+      sourceIpHits.clear();
+      permissionDenied = false;
+      restartCount = 0;
       refreshHome();
-      captureProc = startCapture(backend, iface, localIps, (p) => tracker.ingest(p), onCaptureError);
+      spawnCapture();
       ws.broadcastInit();
     }
   };
@@ -326,10 +403,23 @@ async function main(): Promise<void> {
   );
 
   const shutdown = () => {
+    shuttingDown = true;
+    clearInterval(clusterTimer);
     captureProc?.kill();
     tracker.stop();
     stopProcessPolling();
     ws.stop();
+    // Flush the session log to disk (the master plan promised this on clean close).
+    const ndjson = exportNdjson();
+    if (ndjson) {
+      const file = `netport-radar-${new Date().toISOString().replace(/[:.]/g, '-')}.ndjson`;
+      try {
+        writeFileSync(file, ndjson + '\n');
+        console.log(`\n[log] session written to ${file}`);
+      } catch (e) {
+        console.error('[log] failed to write session log:', e);
+      }
+    }
     process.exit(0);
   };
   process.on('SIGINT', shutdown);
