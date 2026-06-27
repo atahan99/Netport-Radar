@@ -38,9 +38,10 @@ export default function SceneAnnouncer() {
       <p className="sr-only">
         Your computer&apos;s live network connections are shown as aircraft on a{' '}
         {viewMode === '2d' ? '2D map' : '3D globe'}. The visualization is graphical; to browse and
-        select connections with a keyboard or screen reader, use the Departures and Arrivals lists
-        (arrow keys move between rows, Enter selects), or open Filters from the top-right toolbar.
-        Press Escape to clear a selection.
+        select connections with a keyboard or screen reader, press the [ and ] keys to step
+        backward and forward through flights, or use the Departures and Arrivals lists (arrow keys
+        move between rows, Enter selects). Open Filters from the top-right toolbar. Press Escape to
+        clear a selection.
       </p>
       <div aria-live="polite" role="status" className="sr-only">
         {msg}
