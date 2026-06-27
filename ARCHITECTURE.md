@@ -4,6 +4,8 @@ Visualization-only local network monitor. Your machine is an airport; every
 connection is a flight on a great-circle arc. **Read-only by design** — the
 capture path never injects, blocks, or modifies traffic.
 
+![netport-radar data flow: a packet is captured by the root broker (tshark/tcpdump + lsof), streamed over IPC to the unprivileged server (flow tracker, geo lookup, WS/HTTP), then by WebSocket to the browser, where Zustand stores feed a two-channel renderer driving the 2D map, 3D globe, and HUD.](docs/architecture.svg)
+
 ## Data flow
 
 ```
