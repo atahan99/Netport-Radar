@@ -9,6 +9,7 @@ import { useFlightsStore } from '@/store/flights';
 import { useConnectionStore } from '@/store/connection';
 import { useBackendStore, FATAL_CODES } from '@/store/backend';
 import { useToastStore } from '@/store/toasts';
+import { useDiagnosticsStore } from '@/store/diagnostics';
 import { arcProgressLive, STORE_PUSH_MS } from '@/lib/anim';
 import { CRUISE_MS, CRUISE_TARGET, DESCENT_MS, LANDED_TTL_MS } from '@/config';
 
@@ -128,6 +129,7 @@ export function useLiveFlights(enabled: boolean): void {
 
     const connect = () => {
       conn.bumpAttempt(); // count each real attempt (drives the overlay's counter)
+      useDiagnosticsStore.getState().setWsState('connecting');
       // Token only present when the server is bound beyond loopback (it rides
       // the page URL from the server's printed link).
       const token = new URLSearchParams(location.search).get('token');
@@ -135,6 +137,7 @@ export function useLiveFlights(enabled: boolean): void {
       ws.onopen = () => {
         conn.setReconnecting(false);
         backend.setOnline(true);
+        useDiagnosticsStore.getState().setWsState('connected');
         liveControl.send = (m) => ws?.send(JSON.stringify(m));
       };
       ws.onmessage = (ev) => {
@@ -173,10 +176,21 @@ export function useLiveFlights(enabled: boolean): void {
           }
         }
       };
-      ws.onerror = () => ws?.close();
-      ws.onclose = () => {
+      ws.onerror = () => {
+        useDiagnosticsStore.getState().recordWsError('WebSocket connection error');
+        useToastStore.getState().push('WebSocket connection error — retrying…', 'warn');
+        ws?.close();
+      };
+      ws.onclose = (ev) => {
         backend.setOnline(false);
         liveControl.send = () => {};
+        useDiagnosticsStore.getState().recordWsClose(ev.code, ev.reason);
+        if (!closed && ev.code !== 1000) {
+          useToastStore.getState().push(
+            `WebSocket disconnected (code ${ev.code}) — retrying…`,
+            'warn',
+          );
+        }
         if (closed) return;
         conn.setReconnecting(true);
         retry = setTimeout(connect, 3000);
