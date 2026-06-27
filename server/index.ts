@@ -13,7 +13,7 @@ import * as os from 'os';
 import http from 'http';
 import net from 'net';
 import { lookup } from 'dns/promises';
-import { readFileSync, writeFileSync, existsSync } from 'fs';
+import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs';
 import { join, extname } from 'path';
 import type { BackendInfo, HomeAirport } from '../src/types';
 import {
@@ -522,8 +522,12 @@ async function main(): Promise<void> {
     // Flush the session log to disk (the master plan promised this on clean close).
     const ndjson = exportNdjson();
     if (ndjson) {
-      const file = `netport-radar-${new Date().toISOString().replace(/[:.]/g, '-')}.ndjson`;
+      // Keep session logs out of the repo root: write under plans/session-logs/
+      // (gitignored). Created on demand.
+      const dir = join(process.cwd(), 'plans', 'session-logs');
+      const file = join(dir, `netport-radar-${new Date().toISOString().replace(/[:.]/g, '-')}.ndjson`);
       try {
+        mkdirSync(dir, { recursive: true });
         writeFileSync(file, ndjson + '\n');
         console.log(`\n[log] session written to ${file}`);
       } catch (e) {
