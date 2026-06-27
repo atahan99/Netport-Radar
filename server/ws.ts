@@ -2,13 +2,20 @@
 // WebSocket hub. Server → client only. Batches FlightEvents every 100ms.
 
 import { WebSocketServer, WebSocket } from 'ws';
-import type { BackendInfo, FlightEvent, HomeAirport, ServerMessage } from '../src/types';
+import type {
+  BackendInfo,
+  ClientMessage,
+  FlightEvent,
+  HomeAirport,
+  ServerMessage,
+} from '../src/types';
 
 export class WsHub {
   private wss: WebSocketServer;
   private queue: FlightEvent[] = [];
   private flushTimer: ReturnType<typeof setInterval>;
   private lastError: { code: string; message: string } | null = null;
+  onClient: ((msg: ClientMessage, reply: (m: ServerMessage) => void) => void) | null = null;
 
   constructor(
     port: number,
@@ -19,6 +26,15 @@ export class WsHub {
       const { homeAirports, backend } = this.getInit();
       this.sendTo(ws, { type: 'init', homeAirports, backend });
       if (this.lastError) this.sendTo(ws, { type: 'error', ...this.lastError });
+      ws.on('message', (data) => {
+        let msg: ClientMessage;
+        try {
+          msg = JSON.parse(data.toString()) as ClientMessage;
+        } catch {
+          return;
+        }
+        this.onClient?.(msg, (reply) => this.sendTo(ws, reply));
+      });
     });
     this.flushTimer = setInterval(() => this.flush(), 100);
   }
@@ -29,6 +45,15 @@ export class WsHub {
 
   homeUpdate(homeAirports: HomeAirport[]): void {
     this.broadcast({ type: 'home_update', homeAirports });
+  }
+
+  broadcastInit(): void {
+    const { homeAirports, backend } = this.getInit();
+    this.broadcast({ type: 'init', homeAirports, backend });
+  }
+
+  reset(): void {
+    this.broadcast({ type: 'reset' });
   }
 
   error(code: string, message: string): void {
