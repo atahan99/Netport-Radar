@@ -17,6 +17,7 @@ import {
 import { lifecyclePose } from '@/lib/lifecycle';
 import { liveProgress } from '@/lib/anim';
 import { reducedMotion } from '@/lib/motion';
+import { showTip, hideTip, flightTipText } from '@/lib/tooltip';
 import { globeRef as sharedGlobeRef, type GlobeApi } from '@/lib/view-refs';
 import LeaderLine from '@/components/LeaderLine';
 import type { Flight, HomeAirport } from '@/types';
@@ -256,11 +257,44 @@ export default function GlobeView() {
       raf = requestAnimationFrame(frame);
     };
     raf = requestAnimationFrame(frame);
-    return () => cancelAnimationFrame(raf);
+    return () => {
+      cancelAnimationFrame(raf);
+      hideTip();
+    };
   }, [updateMesh]);
 
+  // Hover tooltip: project the rendered flights and show the nearest within 12px
+  // of the pointer (throttled ~30Hz). No raycasting.
+  const lastTip = useRef(0);
+  const onTipMove = useCallback(
+    (e: React.PointerEvent) => {
+      const now = performance.now();
+      if (now - lastTip.current < 33) return;
+      lastTip.current = now;
+      const g = globe.current as unknown as GlobeApi | null;
+      if (!g) return;
+      let best: Flight | null = null;
+      let bestD = 12 * 12;
+      for (const f of renderedRef.current) {
+        const ep = flightEndpoints(homeById(f.homeAirportId), f);
+        const p = interpolateArc(ep.startLat, ep.startLng, ep.endLat, ep.endLng, liveProgress(f));
+        const sc = g.getScreenCoords(p.lat, p.lng, 0.02);
+        const dx = sc.x - e.clientX;
+        const dy = sc.y - e.clientY;
+        const dd = dx * dx + dy * dy;
+        if (dd < bestD) {
+          bestD = dd;
+          best = f;
+        }
+      }
+      if (best) showTip(e.clientX, e.clientY, flightTipText(best));
+      else hideTip();
+    },
+    [homeById],
+  );
+
   return (
-    <div className="absolute inset-0">
+    <div className="absolute inset-0" onPointerMove={onTipMove} onPointerLeave={hideTip}>
       <Globe
         ref={globe}
         width={size.w}
