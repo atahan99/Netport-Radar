@@ -121,6 +121,7 @@ export interface BackendInfo {
   capture: 'tshark' | 'tcpdump' | 'pcap';
   dpiMode: 'full' | 'port-based';
   iface: string;
+  interfaces: string[];
 }
 
 export type FlightEvent =
@@ -134,5 +135,12 @@ export type ServerMessage =
   | { type: 'init'; homeAirports: HomeAirport[]; backend: BackendInfo }
   | { type: 'batch'; events: FlightEvent[] }
   | { type: 'home_update'; homeAirports: HomeAirport[] }
+  | { type: 'reset' }
+  | { type: 'log'; ndjson: string }
   | { type: 'error'; code: string; message: string };
+
+// Client → server control (Phase 4): interface switching + log export.
+export type ClientMessage =
+  | { type: 'switch_iface'; iface: string }
+  | { type: 'export' };
 
