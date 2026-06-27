@@ -35,6 +35,15 @@ function rgba(hex: string, a: number): string {
 // the theme has no country layer (Midnight / Satellite keep the photo earth).
 const NO_POLYGONS: object[] = [];
 
+// Tiny solid-color image used as the globe texture for themed (vector) globes — a
+// flat ocean. Keeping globeImageUrl a real image URL (never undefined) is what
+// makes react-globe.gl reload reliably when switching back to a photo earth.
+function solidGlobeTexture(hex: string): string {
+  return `data:image/svg+xml,${encodeURIComponent(
+    `<svg xmlns="http://www.w3.org/2000/svg" width="4" height="4"><rect width="4" height="4" fill="${hex}"/></svg>`,
+  )}`;
+}
+
 interface DestDot {
   country: string;
   lat: number;
@@ -96,50 +105,11 @@ export default function GlobeView() {
     };
   });
 
-  // Themed globes are a flat ocean-colored sphere with country land drawn as
-  // polygons (see <Globe> below) — the 3D analogue of the 2D vector map. Midnight
-  // and Satellite have no globeWater, so they keep the realistic earth photo + a
-  // multiply tint. We manage the earth texture imperatively (load + cache it,
-  // sRGB) rather than via the globeImageUrl prop, because toggling that prop
-  // undefined↔url did not reliably restore the photo when switching back.
-  // globeMaterial() exists at runtime but isn't in the react-globe.gl types.
-  const texLoaderRef = useRef<THREE.TextureLoader | null>(null);
-  const texCacheRef = useRef<Map<string, THREE.Texture>>(new Map());
-  const applyGlobeTheme = useCallback(() => {
-    const mat = (
-      globe.current as unknown as { globeMaterial?: () => THREE.MeshPhongMaterial }
-    )?.globeMaterial?.();
-    if (!mat?.color) return;
-    if (theme.globeLand && theme.globeWater) {
-      mat.map = null; // hide the photo — flat ocean sphere under the land polygons
-      mat.color.set(theme.globeWater);
-      mat.needsUpdate = true;
-      return;
-    }
-    // Realistic earth: tint white + (re)apply the cached/loaded texture.
-    mat.color.set(theme.globeTint);
-    const url = theme.globeImageUrl;
-    const cached = texCacheRef.current.get(url);
-    if (cached) {
-      mat.map = cached;
-      mat.needsUpdate = true;
-    } else {
-      const loader = (texLoaderRef.current ??= new THREE.TextureLoader());
-      loader.load(url, (tex) => {
-        tex.colorSpace = THREE.SRGBColorSpace;
-        texCacheRef.current.set(url, tex);
-        mat.map = tex;
-        mat.needsUpdate = true;
-      });
-    }
-  }, [theme]);
-
-  // Apply on theme change, and again after the async texture swap settles.
-  useEffect(() => {
-    applyGlobeTheme();
-    const t = setTimeout(applyGlobeTheme, 250);
-    return () => clearTimeout(t);
-  }, [applyGlobeTheme]);
+  // 3D globe surface per theme. Themed themes get a flat ocean-colored texture
+  // (country land + borders are drawn as polygons below) — the 3D analogue of the
+  // 2D vector map; Midnight/Satellite keep the realistic earth photo. It is always
+  // a real image URL (never undefined) so react-globe.gl reloads it reliably.
+  const globeImage = theme.globeWater ? solidGlobeTexture(theme.globeWater) : theme.globeImageUrl;
 
   // Country shapes for the themed vector globe (land polygons + borders), vendored
   // locally. Fetched once when the globe mounts; absent until then (sphere only).
@@ -388,6 +358,7 @@ export default function GlobeView() {
         ref={globe}
         width={size.w}
         height={size.h}
+        globeImageUrl={globeImage}
         backgroundImageUrl="/textures/night-sky.png"
         backgroundColor="#000000"
         atmosphereColor={theme.atmosphere}
@@ -407,7 +378,6 @@ export default function GlobeView() {
           const dir = new THREE.DirectionalLight(0xffffff, 0.85);
           dir.position.set(1, 1, 1);
           scene.add(dir);
-          applyGlobeTheme();
           const primary = homeRef.current.find((a) => a.id === 'primary') ?? homeRef.current[0];
           if (primary) g.pointOfView({ lat: primary.lat, lng: primary.lng, altitude: 2.3 }, 0);
           const c = g.controls() as {
