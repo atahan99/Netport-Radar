@@ -1,0 +1,21 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      # .npmrc sets legacy-peer-deps=true (React 19 peer ranges), honored by npm ci.
+      - run: npm ci
+      # tsc (app) + tsc (server) + eslint + vitest — no system capture deps needed:
+      # the capture tests parse fixture strings and ws-hub uses the `ws` package.
+      - run: npm run check
