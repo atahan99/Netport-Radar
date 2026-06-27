@@ -159,11 +159,14 @@ export default function MapView() {
       style: initialTheme.mapStyle,
       center: [15, 30],
       zoom: 2,
-      // Compact "ⓘ" bottom-right — Carto/OSM tile usage requires attribution.
-      attributionControl: { compact: true },
+      attributionControl: false, // added below so we can place + collapse it
       maxZoom: 12,
     });
     mapRef.current = map;
+    // Compact "ⓘ" (collapsed by default) tucked under the top-right HUD cluster —
+    // Carto/OSM/Esri tile usage requires attribution. CSS nudges it below the
+    // metrics strip so it doesn't sit over the arrivals board (bottom-right).
+    map.addControl(new maplibregl.AttributionControl({ compact: true }), 'top-right');
 
     const markers = new Map<string, maplibregl.Marker>();
     const homeMarkers: maplibregl.Marker[] = [];

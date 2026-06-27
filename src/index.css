@@ -138,6 +138,13 @@ body {
   font-family: inherit;
 }
 
+/* Attribution ⓘ: tuck the top-right control group under the HUD metrics strip
+   (clear of the arrivals board at bottom-right). Loaded after maplibre-gl.css so
+   this wins the cascade. */
+.maplibregl-ctrl-top-right {
+  top: 4rem;
+}
+
 /* Thin dark scrollbars for the boards */
 .hud-scroll::-webkit-scrollbar {
   width: 6px;
