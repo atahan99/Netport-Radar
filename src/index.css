@@ -138,13 +138,6 @@ body {
   font-family: inherit;
 }
 
-/* Theme recolor: tint ONLY the basemap tile canvas, so the DOM plane/home
-   markers keep their per-app livery. Globe earth tint + atmosphere are applied
-   imperatively in GlobeView. */
-.maplibregl-canvas {
-  filter: var(--theme-map-filter, none);
-}
-
 /* Thin dark scrollbars for the boards */
 .hud-scroll::-webkit-scrollbar {
   width: 6px;

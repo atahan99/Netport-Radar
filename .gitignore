@@ -28,3 +28,6 @@ plans/
 
 # test coverage
 coverage
+
+# Runtime flight-log exports written to the repo root by the app
+*.ndjson

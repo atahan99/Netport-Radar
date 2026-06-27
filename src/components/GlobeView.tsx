@@ -94,12 +94,19 @@ export default function GlobeView() {
 
   // Theme tint on the earth material (multiplies the texture; planes keep livery).
   // globeMaterial() exists at runtime but isn't in the react-globe.gl types.
+  // Re-apply on globeImageUrl change too: swapping the texture reloads async and
+  // can clobber the tint, so we set it now and again after the load settles.
   useEffect(() => {
-    const mat = (
-      globe.current as unknown as { globeMaterial?: () => THREE.MeshPhongMaterial }
-    )?.globeMaterial?.();
-    if (mat?.color) mat.color.set(theme.globeTint);
-  }, [theme.globeTint]);
+    const setTint = () => {
+      const mat = (
+        globe.current as unknown as { globeMaterial?: () => THREE.MeshPhongMaterial }
+      )?.globeMaterial?.();
+      if (mat?.color) mat.color.set(theme.globeTint);
+    };
+    setTint();
+    const t = setTimeout(setTint, 250);
+    return () => clearTimeout(t);
+  }, [theme.globeTint, theme.globeImageUrl]);
 
   useEffect(() => {
     const c = globe.current?.controls() as { autoRotate: boolean } | undefined;
@@ -318,7 +325,7 @@ export default function GlobeView() {
         ref={globe}
         width={size.w}
         height={size.h}
-        globeImageUrl="/textures/earth-dark.jpg"
+        globeImageUrl={theme.globeImageUrl}
         backgroundImageUrl="/textures/night-sky.png"
         backgroundColor="#000000"
         atmosphereColor={theme.atmosphere}
