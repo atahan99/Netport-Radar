@@ -15,6 +15,8 @@ import CaptureBanner from '@/components/CaptureBanner';
 import StartupOverlay from '@/components/StartupOverlay';
 import Toasts from '@/components/Toasts';
 import ErrorBoundary from '@/components/ErrorBoundary';
+import FilterChips from '@/components/FilterChips';
+import Legend from '@/components/Legend';
 
 // Code-split the 3D globe: it pulls in the ~3 MB three.js chunk, which the
 // default 2D map + first paint shouldn't have to carry. Loaded on first switch.
@@ -56,9 +58,11 @@ export default function App() {
       <div className="absolute left-4 top-4 z-10">
         <RadarHUD />
       </div>
-      <div className="absolute right-4 top-4 z-20">
+      <div className="absolute right-4 top-4 z-20 flex flex-col items-end gap-2">
         <MetricsStrip />
+        <FilterChips />
       </div>
+      <Legend />
       <div className="absolute bottom-4 left-4 z-10">
         <DeparturesBoard />
       </div>

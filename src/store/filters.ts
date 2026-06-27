@@ -49,6 +49,7 @@ export interface FilterState {
   // View
   viewMode: ViewMode;
   filterDrawerOpen: boolean;
+  legendOpen: boolean;
   // Flight-card position — per view so each can default differently
   cardAnchor2d: CardAnchorMode; // default 'anchored'
   cardAnchor3d: CardAnchorMode; // default 'docked'
@@ -62,8 +63,20 @@ export interface FilterState {
   setViewMode: (m: ViewMode) => void;
   toggleCardAnchor: () => void; // flips the mode for the active viewMode
   toggleFilterDrawer: () => void;
+  setLegend: (open: boolean) => void;
+  toggleLegend: () => void;
+  resetKey: (key: FilterDataKey) => void; // reset one filter to its default
   reset: () => void;
 }
+
+// Filter data keys (no view/card state) — resettable individually via the chips.
+export type FilterDataKey =
+  | BooleanFilterKey
+  | 'dnsDensity'
+  | 'direction'
+  | 'appSearch'
+  | 'isolatedCountry'
+  | 'airportFilter';
 
 const DEFAULTS = {
   showHTTPS: true,
@@ -93,6 +106,7 @@ export const useFiltersStore = create<FilterState>()(
     (set) => ({
       ...DEFAULTS,
       filterDrawerOpen: false,
+      legendOpen: false,
 
       toggle: (key) => set((s) => ({ [key]: !s[key] }) as Partial<FilterState>),
       setDnsDensity: (dnsDensity) => set({ dnsDensity }),
@@ -108,12 +122,17 @@ export const useFiltersStore = create<FilterState>()(
             : { cardAnchor3d: s.cardAnchor3d === 'anchored' ? 'docked' : 'anchored' },
         ),
       toggleFilterDrawer: () => set((s) => ({ filterDrawerOpen: !s.filterDrawerOpen })),
+      setLegend: (legendOpen) => set({ legendOpen }),
+      toggleLegend: () => set((s) => ({ legendOpen: !s.legendOpen })),
+      resetKey: (key) => set({ [key]: DEFAULTS[key] } as Partial<FilterState>),
       reset: () => set({ ...DEFAULTS }),
     }),
     {
       name: 'netport-filters',
       storage: createJSONStorage(() => sessionStorage),
-      // Persist preferences only — not the transient drawer-open state.
+      // Persist preferences only — NOT the transient drawer state, and NOT
+      // appSearch/isolatedCountry (U1): a fresh tab should never start with
+      // hidden traffic the user can't see they enabled last session.
       partialize: (s) => ({
         showHTTPS: s.showHTTPS,
         showHTTP: s.showHTTP,
@@ -129,8 +148,6 @@ export const useFiltersStore = create<FilterState>()(
         showIPv6: s.showIPv6,
         dnsDensity: s.dnsDensity,
         direction: s.direction,
-        appSearch: s.appSearch,
-        isolatedCountry: s.isolatedCountry,
         airportFilter: s.airportFilter,
         viewMode: s.viewMode,
         cardAnchor2d: s.cardAnchor2d,

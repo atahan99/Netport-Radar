@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
-import { Menu, Map as MapIcon, Globe, Pin, PinOff, Download } from 'lucide-react';
+import { Menu, Map as MapIcon, Globe, Pin, PinOff, Download, CircleHelp } from 'lucide-react';
 import { useFlightsStore } from '@/store/flights';
 import { useFiltersStore } from '@/store/filters';
+import { filterChips } from '@/components/FilterChips';
 import { useRenderQueue } from '@/hooks/useRenderQueue';
 import { useBackendStore } from '@/store/backend';
 import { Button } from '@/components/ui/button';
@@ -105,6 +106,8 @@ export default function MetricsStrip() {
   const viewMode = useFiltersStore((s) => s.viewMode);
   const setViewMode = useFiltersStore((s) => s.setViewMode);
   const toggleFilterDrawer = useFiltersStore((s) => s.toggleFilterDrawer);
+  const toggleLegend = useFiltersStore((s) => s.toggleLegend);
+  const hasActiveFilters = useFiltersStore((s) => filterChips(s).length > 0);
   const toggleCardAnchor = useFiltersStore((s) => s.toggleCardAnchor);
   const cardMode = useFiltersStore((s) => (s.viewMode === '2d' ? s.cardAnchor2d : s.cardAnchor3d));
   const backend = useBackendStore((s) => s.backend);
@@ -200,8 +203,16 @@ export default function MetricsStrip() {
       </Select>
 
       <div className="flex items-center gap-1.5">
-        <StripButton onClick={toggleFilterDrawer} label="Filters">
-          <Menu />
+        <div className="relative">
+          <StripButton onClick={toggleFilterDrawer} label="Filters">
+            <Menu />
+          </StripButton>
+          {hasActiveFilters && (
+            <span className="pointer-events-none absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full bg-amber-400" />
+          )}
+        </div>
+        <StripButton onClick={toggleLegend} label="Legend">
+          <CircleHelp />
         </StripButton>
         <StripButton onClick={() => setViewMode(viewMode === '2d' ? '3d' : '2d')} label="2D / 3D">
           {viewMode === '2d' ? <MapIcon /> : <Globe />}
