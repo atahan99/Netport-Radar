@@ -1,6 +1,7 @@
 import { X } from 'lucide-react';
 import { useFlightsStore } from '@/store/flights';
 import { useFiltersStore } from '@/store/filters';
+import { useBackendStore } from '@/store/backend';
 import { mapRef, globeRef } from '@/lib/view-refs';
 import { flightEndpoints } from '@/lib/arc';
 import { interpolateArc } from '@/lib/interpolate';
@@ -66,6 +67,15 @@ export default function FlightCard() {
   const selectFlight = useFlightsStore((s) => s.selectFlight);
   const viewMode = useFiltersStore((s) => s.viewMode);
   const mode = useFiltersStore((s) => (s.viewMode === '2d' ? s.cardAnchor2d : s.cardAnchor3d));
+  const backend = useBackendStore((s) => s.backend);
+  const dpi =
+    import.meta.env.VITE_DEMO === '1'
+      ? 'demo'
+      : backend
+        ? backend.dpiMode === 'full'
+          ? 'tshark'
+          : 'port-based'
+        : '—';
 
   const f = flights.find((x) => x.id === selectedId);
   if (!f) return null;
@@ -120,7 +130,8 @@ export default function FlightCard() {
       </div>
 
       <div className="px-3 py-1.5 text-[11px] text-zinc-500">
-        {f.direction === 'inbound' ? 'Arriving' : 'Departing'}: {home?.label ?? '—'} · DPI: demo · SNI: —
+        {f.direction === 'inbound' ? 'Arriving' : 'Departing'}: {home?.label ?? '—'} · DPI: {dpi} · SNI:{' '}
+        {f.sni ?? '—'}
       </div>
 
       <div className="flex items-center justify-between border-y border-zinc-800 px-3 py-2 font-mono text-[11px] text-zinc-400">

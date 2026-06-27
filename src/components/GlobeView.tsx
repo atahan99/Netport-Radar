@@ -6,7 +6,12 @@ import { useFiltersStore } from '@/store/filters';
 import { getRenderQueue } from '@/lib/render-queue';
 import { flightEndpoints } from '@/lib/arc';
 import { interpolateArc, arcPoints, greatCircleKm, arcAltitude } from '@/lib/interpolate';
-import { createPlaneMesh, setPlaneSelected, disposeUnusedMaterials } from '@/lib/globe-meshes';
+import {
+  createPlaneMesh,
+  setPlaneSelected,
+  recolorPlane,
+  disposeUnusedMaterials,
+} from '@/lib/globe-meshes';
 import { globeRef as sharedGlobeRef, type GlobeApi } from '@/lib/view-refs';
 import type { Flight, HomeAirport } from '@/types';
 
@@ -179,6 +184,7 @@ export default function GlobeView() {
       _m.makeBasis(_right, _up, _fwd);
       o.quaternion.setFromRotationMatrix(_m);
       setPlaneSelected(o, f.id === selRef.current);
+      recolorPlane(o, f.liveryColor, f.aircraftType);
     },
     [homeById],
   );

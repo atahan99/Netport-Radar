@@ -23,6 +23,7 @@ function iconSvg(f: Flight, size: number): string {
 function makeMarkerEl(f: Flight): HTMLDivElement {
   const wrap = document.createElement('div');
   wrap.style.cssText = 'position:relative;cursor:pointer;will-change:transform';
+  wrap.dataset.color = f.liveryColor;
   const plane = document.createElement('div');
   plane.dataset.role = 'plane';
   plane.style.cssText =
@@ -48,6 +49,15 @@ function updateMarkerEl(
   const label = el.querySelector('[data-role=label]') as HTMLElement;
   const svg = plane.firstElementChild as SVGElement | null;
   if (svg) svg.style.transform = `rotate(${heading - 90}deg)`;
+  if (el.dataset.color !== f.liveryColor) {
+    el.dataset.color = f.liveryColor;
+    const path = svg?.querySelector('path');
+    if (path) {
+      const icon = AIRCRAFT_ICONS[f.aircraftType];
+      path.setAttribute('fill', icon.mode === 'fill' ? f.liveryColor : 'none');
+      path.setAttribute('stroke', icon.mode === 'stroke' ? f.liveryColor : 'none');
+    }
+  }
   let opacity = 1;
   if (f.aircraftType === 'stealth') opacity = 0.6;
   if (f.phase === 'taxi') opacity = 0.85;
