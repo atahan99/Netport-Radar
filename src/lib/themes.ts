@@ -82,7 +82,10 @@ export const THEMES: Theme[] = [
     globeImageUrl: EARTH_DARK,
     bg: '#000a04',
     mapStyle: DARK,
-    mapRecolor: { background: '#000a04', water: '#00130b', land: '#001509', line: '#00b34d', text: '#3dff8b' },
+    // background = continents (at world zoom the visible "land" is the basemap
+    // background layer); water = oceans. Keep continents a clear notch brighter
+    // than oceans so landmasses read as shapes, with line/text bright on top.
+    mapRecolor: { background: '#072a17', water: '#00110b', land: '#0a3a20', line: '#00c853', text: '#54ff9a' },
   },
   {
     id: 'cyberpunk',
@@ -93,7 +96,7 @@ export const THEMES: Theme[] = [
     globeImageUrl: EARTH_DARK,
     bg: '#0a0016',
     mapStyle: DARK,
-    mapRecolor: { background: '#0a0016', water: '#16002e', land: '#100024', line: '#ff3cac', text: '#36e9ff' },
+    mapRecolor: { background: '#1c0a3a', water: '#0a0018', land: '#24114a', line: '#ff45b0', text: '#46ecff' },
   },
   {
     id: 'amber',
@@ -104,7 +107,7 @@ export const THEMES: Theme[] = [
     globeImageUrl: EARTH_DARK,
     bg: '#0a0600',
     mapStyle: DARK,
-    mapRecolor: { background: '#0a0600', water: '#1c1000', land: '#160c00', line: '#b97c00', text: '#ffc23d' },
+    mapRecolor: { background: '#2a1800', water: '#0c0600', land: '#352000', line: '#e09600', text: '#ffd166' },
   },
   {
     id: 'blueprint',
@@ -115,7 +118,7 @@ export const THEMES: Theme[] = [
     globeImageUrl: EARTH_DARK,
     bg: '#00040d',
     mapStyle: DARK,
-    mapRecolor: { background: '#00060f', water: '#001233', land: '#000c24', line: '#2f7bff', text: '#7fb4ff' },
+    mapRecolor: { background: '#0c2147', water: '#00163a', land: '#0e2a55', line: '#4a90ff', text: '#9cc4ff' },
   },
   {
     id: 'arctic',
