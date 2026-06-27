@@ -18,6 +18,7 @@ import { lifecyclePose } from '@/lib/lifecycle';
 import { liveProgress } from '@/lib/anim';
 import { reducedMotion } from '@/lib/motion';
 import { showTip, hideTip, flightTipText } from '@/lib/tooltip';
+import { THEME_BY_ID } from '@/lib/themes';
 import { globeRef as sharedGlobeRef, type GlobeApi } from '@/lib/view-refs';
 import LeaderLine from '@/components/LeaderLine';
 import type { Flight, HomeAirport } from '@/types';
@@ -51,6 +52,8 @@ export default function GlobeView() {
   const homeAirports = useFlightsStore((s) => s.homeAirports);
   const selectedId = useFlightsStore((s) => s.selectedFlightId);
   const filters = useFiltersStore();
+  const themeId = useFiltersStore((s) => s.theme);
+  const theme = THEME_BY_ID[themeId];
   const idleTimer = useRef<number | undefined>(undefined);
 
   // Refs so accessors below can be identity-stable (never trigger layer rebuilds).
@@ -88,6 +91,15 @@ export default function GlobeView() {
       sharedGlobeRef.current = null;
     };
   });
+
+  // Theme tint on the earth material (multiplies the texture; planes keep livery).
+  // globeMaterial() exists at runtime but isn't in the react-globe.gl types.
+  useEffect(() => {
+    const mat = (
+      globe.current as unknown as { globeMaterial?: () => THREE.MeshPhongMaterial }
+    )?.globeMaterial?.();
+    if (mat?.color) mat.color.set(theme.globeTint);
+  }, [theme.globeTint]);
 
   useEffect(() => {
     const c = globe.current?.controls() as { autoRotate: boolean } | undefined;
@@ -302,7 +314,7 @@ export default function GlobeView() {
         globeImageUrl="/textures/earth-dark.jpg"
         backgroundImageUrl="/textures/night-sky.png"
         backgroundColor="#000000"
-        atmosphereColor="#3a82ff"
+        atmosphereColor={theme.atmosphere}
         atmosphereAltitude={0.16}
         onGlobeReady={() => {
           const g = globe.current;
@@ -312,6 +324,10 @@ export default function GlobeView() {
           const dir = new THREE.DirectionalLight(0xffffff, 0.85);
           dir.position.set(1, 1, 1);
           scene.add(dir);
+          const mat = (
+            g as unknown as { globeMaterial?: () => THREE.MeshPhongMaterial }
+          ).globeMaterial?.();
+          if (mat?.color) mat.color.set(theme.globeTint);
           const primary = homeRef.current.find((a) => a.id === 'primary') ?? homeRef.current[0];
           if (primary) g.pointOfView({ lat: primary.lat, lng: primary.lng, altitude: 2.3 }, 0);
           const c = g.controls() as {

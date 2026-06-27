@@ -63,7 +63,7 @@ body,
 
 body {
   margin: 0;
-  background: #000;
+  background: var(--theme-bg, #000);
   color: hsl(var(--foreground));
   font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   -webkit-font-smoothing: antialiased;
@@ -136,6 +136,13 @@ body {
 /* MapLibre canvas should never intercept text selection cursor */
 .maplibregl-map {
   font-family: inherit;
+}
+
+/* Theme recolor: tint ONLY the basemap tile canvas, so the DOM plane/home
+   markers keep their per-app livery. Globe earth tint + atmosphere are applied
+   imperatively in GlobeView. */
+.maplibregl-canvas {
+  filter: var(--theme-map-filter, none);
 }
 
 /* Thin dark scrollbars for the boards */

@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
+import type { ThemeName } from '@/lib/themes';
 
 export type DnsDensity = 'sample' | 'all' | 'none';
 export type Direction = 'both' | 'outbound' | 'inbound';
@@ -48,6 +49,7 @@ export interface FilterState {
   airportFilter: AirportFilter;
   // View
   viewMode: ViewMode;
+  theme: ThemeName;
   filterDrawerOpen: boolean;
   legendOpen: boolean;
   // Flight-card position — per view so each can default differently
@@ -61,6 +63,7 @@ export interface FilterState {
   setIsolatedCountry: (c: string | null) => void;
   setAirportFilter: (f: AirportFilter) => void;
   setViewMode: (m: ViewMode) => void;
+  setTheme: (t: ThemeName) => void;
   toggleCardAnchor: () => void; // flips the mode for the active viewMode
   toggleFilterDrawer: () => void;
   setLegend: (open: boolean) => void;
@@ -97,6 +100,7 @@ const DEFAULTS = {
   isolatedCountry: null as string | null,
   airportFilter: 'all' as AirportFilter,
   viewMode: '2d' as ViewMode,
+  theme: 'midnight' as ThemeName,
   cardAnchor2d: 'anchored' as CardAnchorMode,
   cardAnchor3d: 'docked' as CardAnchorMode,
 };
@@ -115,6 +119,7 @@ export const useFiltersStore = create<FilterState>()(
       setIsolatedCountry: (isolatedCountry) => set({ isolatedCountry }),
       setAirportFilter: (airportFilter) => set({ airportFilter }),
       setViewMode: (viewMode) => set({ viewMode }),
+      setTheme: (theme) => set({ theme }),
       toggleCardAnchor: () =>
         set((s) =>
           s.viewMode === '2d'
@@ -150,6 +155,7 @@ export const useFiltersStore = create<FilterState>()(
         direction: s.direction,
         airportFilter: s.airportFilter,
         viewMode: s.viewMode,
+        theme: s.theme,
         cardAnchor2d: s.cardAnchor2d,
         cardAnchor3d: s.cardAnchor3d,
       }),
