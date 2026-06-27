@@ -18,6 +18,7 @@ import StartupOverlay from '@/components/StartupOverlay';
 import ErrorBoundary from '@/components/ErrorBoundary';
 import FilterChips from '@/components/FilterChips';
 import Legend from '@/components/Legend';
+import SceneAnnouncer from '@/components/SceneAnnouncer';
 
 // Code-split the 3D globe: it pulls in the ~3 MB three.js chunk, which the
 // default 2D map + first paint shouldn't have to carry. Loaded on first switch.
@@ -53,6 +54,10 @@ export default function App() {
 
   return (
     <div className="relative h-screen w-screen overflow-hidden bg-black">
+      {/* Screen-reader scene description + selected-flight live region (the map
+          itself is a canvas and invisible to assistive tech). */}
+      <SceneAnnouncer />
+
       {/* Map / globe fills the screen; ErrorBoundary keeps a view crash (e.g. the
           lazy globe chunk) from white-screening the whole app. */}
       <ErrorBoundary>
@@ -71,8 +76,9 @@ export default function App() {
         )}
       </ErrorBoundary>
 
-      {/* Wordmark behind the HUD — tinted by the active theme accent */}
+      {/* Wordmark behind the HUD — tinted by the active theme accent (decorative) */}
       <div
+        aria-hidden="true"
         className="pointer-events-none absolute inset-x-0 top-5 z-0 text-center text-sm font-semibold tracking-[0.35em]"
         style={{ color: 'var(--theme-accent, #3f3f46)', opacity: 0.4 }}
       >
