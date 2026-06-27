@@ -16,7 +16,7 @@ export default function CaptureBanner() {
     : 'border-amber-700/60 bg-amber-950/90 text-amber-200';
   return (
     <div
-      className={`absolute left-1/2 top-16 z-40 -translate-x-1/2 whitespace-nowrap rounded-md border px-3 py-1.5 text-xs backdrop-blur-sm ${tone}`}
+      className={`pointer-events-auto whitespace-nowrap rounded-md border px-3 py-1.5 text-xs backdrop-blur-sm ${tone}`}
     >
       <span aria-hidden="true">⚠</span> {error.message}
     </div>

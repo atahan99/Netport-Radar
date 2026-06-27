@@ -1,6 +1,7 @@
-import { lazy, Suspense } from 'react';
+import { lazy, Suspense, useEffect } from 'react';
 import { Loader2 } from 'lucide-react';
 import { useFiltersStore } from '@/store/filters';
+import { useFlightsStore } from '@/store/flights';
 import { useDemoFlights } from '@/lib/demo';
 import { useLiveFlights } from '@/lib/live';
 import MapView from '@/components/MapView';
@@ -11,9 +12,8 @@ import ArrivalsBoard from '@/components/ArrivalsBoard';
 import RadarHUD from '@/components/RadarHUD';
 import MetricsStrip from '@/components/MetricsStrip';
 import ReconnectingOverlay from '@/components/ReconnectingOverlay';
-import CaptureBanner from '@/components/CaptureBanner';
+import NoticeStack from '@/components/NoticeStack';
 import StartupOverlay from '@/components/StartupOverlay';
-import Toasts from '@/components/Toasts';
 import ErrorBoundary from '@/components/ErrorBoundary';
 import FilterChips from '@/components/FilterChips';
 import Legend from '@/components/Legend';
@@ -28,6 +28,21 @@ export default function App() {
   const demo = import.meta.env.VITE_DEMO === '1';
   useDemoFlights(demo);
   useLiveFlights(!demo);
+
+  // Esc priority: close the legend, else the filter drawer, else deselect.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      const f = useFiltersStore.getState();
+      if (f.legendOpen) f.setLegend(false);
+      else if (f.filterDrawerOpen) f.toggleFilterDrawer();
+      else if (useFlightsStore.getState().selectedFlightId) {
+        useFlightsStore.getState().selectFlight(null);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
 
   return (
     <div className="relative h-screen w-screen overflow-hidden bg-black">
@@ -76,11 +91,8 @@ export default function App() {
       {/* Filter drawer (shadcn Sheet) */}
       <FilterPanel />
 
-      {/* Capture-layer banner (e.g. needs sudo) — WS is up but no packets */}
-      <CaptureBanner />
-
-      {/* Transient runtime notifications (interface down, capture hiccups) */}
-      <Toasts />
+      {/* Capture banner (sudo) + transient toasts, stacked top-center */}
+      <NoticeStack />
 
       {/* Reconnecting overlay — shown when the WS to the server drops */}
       <ReconnectingOverlay />

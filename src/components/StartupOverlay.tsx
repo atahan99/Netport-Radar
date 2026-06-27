@@ -29,7 +29,10 @@ export default function StartupOverlay() {
   const fix = FIXES[error.code] ?? { title: 'Capture unavailable', body: error.message };
 
   return (
-    <div className="absolute inset-0 z-50 flex flex-col items-center justify-center gap-5 bg-black/[0.97] p-8 animate-fade-in">
+    <div
+      className="absolute inset-0 z-50 flex flex-col items-center justify-center gap-5 bg-black/[0.97] p-8 animate-fade-in"
+      role="alert"
+    >
       <OctagonAlert className="h-10 w-10 text-red-500" />
       <div className="max-w-md text-center">
         <div className="text-base font-semibold text-zinc-100">{fix.title}</div>
