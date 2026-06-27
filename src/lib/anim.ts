@@ -7,14 +7,11 @@
 // frame and reposition markers/meshes imperatively.
 
 import type { Flight } from '@/types';
+export { STORE_PUSH_MS } from '@/config';
 
 // flightId → current arcProgress (0..1). Written by the live/demo rAF loop every
 // frame; read by MapView, GlobeView, FlightCard, LeaderLine.
 export const arcProgressLive = new Map<string, number>();
-
-// Cadence of the semantic Zustand push. Animation stays at full frame rate via
-// arcProgressLive; only the React-facing snapshot is throttled to this.
-export const STORE_PUSH_MS = 100; // 10Hz
 
 // Animated progress for a flight, falling back to the last snapshot value (e.g.
 // a flight present in the store but not yet ticked, or after a tab regains focus).

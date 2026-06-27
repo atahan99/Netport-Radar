@@ -8,13 +8,15 @@ import { classify } from '../src/lib/classify';
 import { liveryColor } from '../src/lib/livery';
 import { geoLookup, resolveHostname, type RawPacket } from './capture';
 import { lookupProcess } from './process-names';
-
-const DNS_HOLD_MS = 2000;
-const HOLD_IDLE_MS = 5000;
-const DESCENT_MS = 2000;
-const STALE_MS = 120_000;
-const CLOSED_TTL_MS = 30_000;
-const EMIT_MIN_MS = 1000; // min interval between metric patches per flow (phase/hostname stay immediate)
+import {
+  DNS_HOLD_MS,
+  HOLD_IDLE_MS,
+  DESCENT_MS,
+  STALE_MS,
+  CLOSED_TTL_MS,
+  EMIT_MIN_MS,
+  TICK_MS,
+} from './config';
 
 // DoH can't be seen by DPI (the DNS lives inside TLS, so frame.protocols shows
 // only tls/http2 → detected as HTTPS). When the SNI/hostname is a known public
@@ -127,7 +129,7 @@ export class FlowTracker {
   private timer: ReturnType<typeof setInterval>;
 
   constructor(private opts: FlowTrackerOpts) {
-    this.timer = setInterval(() => this.tick(), 250);
+    this.timer = setInterval(() => this.tick(), TICK_MS);
   }
 
   stop() {

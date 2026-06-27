@@ -5,9 +5,7 @@
 import type { Flight, FlightPhase } from '@/types';
 import type { FilterState } from '@/store/filters';
 import { protocolFamily } from './classify';
-
-const MAIN_CAP = 150;
-const DNS_CAP = 20;
+import { MAIN_CAP, DNS_CAP } from '@/config';
 
 const PHASE_PRIORITY: Record<FlightPhase, number> = {
   descent: 5,

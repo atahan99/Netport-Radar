@@ -68,7 +68,6 @@ function exportLog() {
       }),
     )
     .join('\n');
-  console.log(`[netport-radar] session log — ${flights.length} flights\n${lines}`);
   const blob = new Blob([lines], { type: 'application/x-ndjson' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');

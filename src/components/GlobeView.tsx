@@ -52,10 +52,16 @@ export default function GlobeView() {
   const idleTimer = useRef<number | undefined>(undefined);
 
   // Refs so accessors below can be identity-stable (never trigger layer rebuilds).
+  // Kept in sync via effects (not written during render) so the rAF ticker and
+  // accessors read the latest home/selection without rebuilding globe layers.
   const homeRef = useRef(homeAirports);
-  homeRef.current = homeAirports;
   const selRef = useRef(selectedId);
-  selRef.current = selectedId;
+  useEffect(() => {
+    homeRef.current = homeAirports;
+  }, [homeAirports]);
+  useEffect(() => {
+    selRef.current = selectedId;
+  }, [selectedId]);
   const homeById = useCallback(
     (id: string): HomeAirport | undefined => homeRef.current.find((a) => a.id === id),
     [],

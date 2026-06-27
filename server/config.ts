@@ -17,3 +17,15 @@ export const IS_LOCAL_BIND =
 // One random token per boot, only when exposed beyond loopback. Loopback mode
 // stays tokenless — zero friction for the normal local case.
 export const TOKEN: string | null = IS_LOCAL_BIND ? null : randomBytes(16).toString('hex');
+
+// ── Flow tracker / capture timings (ms) ─────────────────────────────────────
+export const DNS_HOLD_MS = 2000; // taxi: hold for DNS before launch
+export const HOLD_IDLE_MS = 5000; // cruise → hold after this much idle
+export const DESCENT_MS = 2000; // FIN/RST → landed after this
+export const STALE_MS = 120_000; // force-close a silent flow
+export const CLOSED_TTL_MS = 30_000; // drop a closed flow from server memory
+export const EMIT_MIN_MS = 1000; // min interval between metric patches per flow
+export const TICK_MS = 250; // flow-tracker tick
+export const PROCESS_POLL_MS = 2000; // lsof poll interval
+export const WS_FLUSH_MS = 100; // WS event-batch flush interval
+export const WS_MAX_PAYLOAD = 4096; // max inbound client frame size

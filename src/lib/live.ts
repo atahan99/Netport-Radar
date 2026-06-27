@@ -10,15 +10,12 @@ import { useConnectionStore } from '@/store/connection';
 import { useBackendStore, FATAL_CODES } from '@/store/backend';
 import { useToastStore } from '@/store/toasts';
 import { arcProgressLive, STORE_PUSH_MS } from '@/lib/anim';
+import { CRUISE_MS, CRUISE_TARGET, DESCENT_MS, LANDED_TTL_MS } from '@/config';
 
 interface LiveFlight extends Flight {
   phaseStartedAt: number; // client clock (performance.now) when current phase began
   cruiseBase: number; // arcProgress when cruise/descent began (for resume)
 }
-
-const CRUISE_MS = 18000; // visual time to fly out to the cruise hold point
-const CRUISE_TARGET = 0.8;
-const LANDED_TTL_MS = 60_000;
 
 // Control handle — live while the socket is open so the UI (MetricsStrip) can
 // request an interface switch / log export.
@@ -92,7 +89,7 @@ export function useLiveFlights(enabled: boolean): void {
       else if (lf.phase === 'cruise')
         lf.arcProgress = Math.min(CRUISE_TARGET, lf.cruiseBase + (dt / CRUISE_MS) * CRUISE_TARGET);
       else if (lf.phase === 'descent')
-        lf.arcProgress = Math.min(1, lf.cruiseBase + (dt / 2000) * (1 - lf.cruiseBase));
+        lf.arcProgress = Math.min(1, lf.cruiseBase + (dt / DESCENT_MS) * (1 - lf.cruiseBase));
       else if (lf.phase === 'landed') lf.arcProgress = 1;
       // hold: keep current arcProgress
     };
