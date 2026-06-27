@@ -72,6 +72,21 @@ export interface RenderQueue {
   offScreenCount: number;
 }
 
+// Ref-equality memo. The flight array changes only at the 10Hz store cadence
+// now, but MapView's and GlobeView's per-frame loops (plus MetricsStrip) all
+// want the queue — without this the filter + double-sort would run several times
+// per frame. Single-entry is enough: every caller reads the same two store refs.
+let lastFlights: Flight[] | null = null;
+let lastFilters: FilterState | null = null;
+let lastResult: RenderQueue | null = null;
+export function getRenderQueueMemo(flights: Flight[], filters: FilterState): RenderQueue {
+  if (flights === lastFlights && filters === lastFilters && lastResult) return lastResult;
+  lastFlights = flights;
+  lastFilters = filters;
+  lastResult = getRenderQueue(flights, filters);
+  return lastResult;
+}
+
 export function getRenderQueue(flights: Flight[], filters: FilterState): RenderQueue {
   const mainEligible: Flight[] = [];
   let dnsEligible: Flight[] = [];

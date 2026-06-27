@@ -3,7 +3,7 @@ import * as THREE from 'three';
 import Globe, { type GlobeMethods } from 'react-globe.gl';
 import { useFlightsStore } from '@/store/flights';
 import { useFiltersStore } from '@/store/filters';
-import { getRenderQueue } from '@/lib/render-queue';
+import { getRenderQueueMemo } from '@/lib/render-queue';
 import { flightEndpoints } from '@/lib/arc';
 import { interpolateArc, arcPoints, greatCircleKm, arcAltitude } from '@/lib/interpolate';
 import {
@@ -89,7 +89,7 @@ export default function GlobeView() {
   // Plane meshes update every frame (cheap). Trails + dots are throttled to
   // ~11fps via state so their geometry doesn't rebuild 60×/sec.
   const { mainQueue, dnsQueue } = useMemo(
-    () => getRenderQueue(flights, filters),
+    () => getRenderQueueMemo(flights, filters),
     [flights, filters],
   );
   const rendered = useMemo(() => [...mainQueue, ...dnsQueue], [mainQueue, dnsQueue]);
@@ -103,7 +103,7 @@ export default function GlobeView() {
     const tick = () => {
       const fl = useFlightsStore.getState().flights;
       const ft = useFiltersStore.getState();
-      const q = getRenderQueue(fl, ft);
+      const q = getRenderQueueMemo(fl, ft);
       const set = [...q.mainQueue, ...q.dnsQueue];
       setTrailData(
         set.filter((f) => f.phase === 'cruise' || f.phase === 'hold' || f.phase === 'descent'),

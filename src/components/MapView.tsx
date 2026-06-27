@@ -3,7 +3,7 @@ import maplibregl from 'maplibre-gl';
 import type { Feature, FeatureCollection } from 'geojson';
 import { useFlightsStore } from '@/store/flights';
 import { useFiltersStore } from '@/store/filters';
-import { getRenderQueue } from '@/lib/render-queue';
+import { getRenderQueueMemo } from '@/lib/render-queue';
 import { interpolateArc, arcPoints } from '@/lib/interpolate';
 import { flightEndpoints } from '@/lib/arc';
 import { liveProgress } from '@/lib/anim';
@@ -134,7 +134,7 @@ export default function MapView() {
       if (!loaded) return;
       const { flights, homeAirports, selectedFlightId } = useFlightsStore.getState();
       const filters = useFiltersStore.getState();
-      const { mainQueue, dnsQueue } = getRenderQueue(flights, filters);
+      const { mainQueue, dnsQueue } = getRenderQueueMemo(flights, filters);
       const rendered = [...mainQueue, ...dnsQueue];
       const showLabels = map.getZoom() >= 3;
       const now = performance.now();

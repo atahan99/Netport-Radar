@@ -14,6 +14,7 @@ const HOLD_IDLE_MS = 5000;
 const DESCENT_MS = 2000;
 const STALE_MS = 120_000;
 const CLOSED_TTL_MS = 30_000;
+const EMIT_MIN_MS = 1000; // min interval between metric patches per flow (phase/hostname stay immediate)
 
 // DoH can't be seen by DPI (the DNS lives inside TLS, so frame.protocols shows
 // only tls/http2 → detected as HTTPS). When the SNI/hostname is a known public
@@ -41,6 +42,7 @@ interface Flow {
   processResolved: boolean;
   lastEmittedBytes: number;
   lastEmittedBps: number;
+  lastEmitAt: number;
   bps: { t: number; bytes: number }[]; // rolling 3s window
 }
 
@@ -292,6 +294,7 @@ export class FlowTracker {
       processResolved: false,
       lastEmittedBytes: -1,
       lastEmittedBps: -1,
+      lastEmitAt: 0,
       bps: [],
     };
     this.resolveProcess(flow);
@@ -403,11 +406,16 @@ export class FlowTracker {
         this.setPhase(flow, 'hold');
       }
 
-      // throttled metric update — also fires when bytesPerSec changes (so the
-      // rate decays to 0 on an idle/hold flow instead of freezing at its peak)
-      if (f.bytesTotal !== flow.lastEmittedBytes || f.bytesPerSec !== flow.lastEmittedBps) {
+      // throttled metric update — fires when bytes or rate changed (so the rate
+      // decays to 0 on an idle flow) but at most once a second per flow. Phase,
+      // hostname, recolor, opened and closed events stay immediate.
+      if (
+        (f.bytesTotal !== flow.lastEmittedBytes || f.bytesPerSec !== flow.lastEmittedBps) &&
+        now - flow.lastEmitAt >= EMIT_MIN_MS
+      ) {
         flow.lastEmittedBytes = f.bytesTotal;
         flow.lastEmittedBps = f.bytesPerSec;
+        flow.lastEmitAt = now;
         this.opts.onEvent({
           event: 'updated',
           id: f.id,
