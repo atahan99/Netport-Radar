@@ -15,6 +15,19 @@ const DESCENT_MS = 2000;
 const STALE_MS = 120_000;
 const CLOSED_TTL_MS = 30_000;
 
+// DoH can't be seen by DPI (the DNS lives inside TLS, so frame.protocols shows
+// only tls/http2 → detected as HTTPS). When the SNI/hostname is a known public
+// resolver, reclassify to DoH (→ drone, DNS family). List-based, not DPI.
+const DOH_HOSTS = new Set([
+  'dns.google',
+  'cloudflare-dns.com',
+  'one.one.one.one',
+  'mozilla.cloudflare-dns.com',
+  'dns.quad9.net',
+  'doh.opendns.com',
+  'dns.nextdns.io',
+]);
+
 interface Flow {
   flight: Flight;
   opened: boolean;
@@ -27,6 +40,7 @@ interface Flow {
   hostnameResolved: boolean;
   processResolved: boolean;
   lastEmittedBytes: number;
+  lastEmittedBps: number;
   bps: { t: number; bytes: number }[]; // rolling 3s window
 }
 
@@ -162,6 +176,7 @@ export class FlowTracker {
       flow.hostnameResolved = true;
       f.hostnameResolved = true;
       if (flow.opened) this.opts.onEvent({ event: 'hostname', id: f.id, hostname: p.host, sni: p.host });
+      this.maybeReclassifyDoH(flow);
     }
     // data resumes → back to cruise
     if (flow.opened && f.phase === 'hold') this.setPhase(flow, 'cruise');
@@ -262,6 +277,7 @@ export class FlowTracker {
         // owning process is still unknown.
         if (!flow.processResolved) flow.flight.liveryColor = liveryColor(name);
         if (flow.opened) this.opts.onEvent({ event: 'hostname', id: flow.flight.id, hostname: name });
+        this.maybeReclassifyDoH(flow);
       });
     }
 
@@ -275,6 +291,7 @@ export class FlowTracker {
       hostnameResolved: false,
       processResolved: false,
       lastEmittedBytes: -1,
+      lastEmittedBps: -1,
       bps: [],
     };
     this.resolveProcess(flow);
@@ -299,6 +316,23 @@ export class FlowTracker {
     f.liveryColor = liveryColor(proc.process);
     flow.processResolved = true;
     return true;
+  }
+
+  // SNI/hostname revealed a known DoH resolver → it's DNS traffic, not HTTPS.
+  private maybeReclassifyDoH(flow: Flow): void {
+    const f = flow.flight;
+    if (f.detectedProtocol === 'DoH') return;
+    const host = (f.sni || f.hostname || '').toLowerCase();
+    if (!DOH_HOSTS.has(host)) return;
+    f.detectedProtocol = 'DoH';
+    f.aircraftType = classify('DoH', f.bytesTotal, f.durationMs);
+    if (flow.opened) {
+      this.opts.onEvent({
+        event: 'updated',
+        id: f.id,
+        patch: { detectedProtocol: f.detectedProtocol, aircraftType: f.aircraftType },
+      });
+    }
   }
 
   private setPhase(flow: Flow, phase: FlightPhase): void {
@@ -369,9 +403,11 @@ export class FlowTracker {
         this.setPhase(flow, 'hold');
       }
 
-      // throttled metric update
-      if (f.bytesTotal !== flow.lastEmittedBytes) {
+      // throttled metric update — also fires when bytesPerSec changes (so the
+      // rate decays to 0 on an idle/hold flow instead of freezing at its peak)
+      if (f.bytesTotal !== flow.lastEmittedBytes || f.bytesPerSec !== flow.lastEmittedBps) {
         flow.lastEmittedBytes = f.bytesTotal;
+        flow.lastEmittedBps = f.bytesPerSec;
         this.opts.onEvent({
           event: 'updated',
           id: f.id,

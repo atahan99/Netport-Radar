@@ -129,19 +129,29 @@ export default function MetricsStrip() {
   const outRef = useRef<number[]>([]);
   const inCanvas = useRef<HTMLCanvasElement>(null);
   const outCanvas = useRef<HTMLCanvasElement>(null);
+  const prevBytes = useRef<Map<string, { tx: number; rx: number }>>(new Map());
   const [rates, setRates] = useState({ down: 0, up: 0 });
 
   useEffect(() => {
     const id = setInterval(() => {
+      // Real ↓/↑: sum the per-flow growth in received (rx) and sent (tx) bytes
+      // since the last tick. ×2 turns a 500ms delta into a per-second rate.
       const flights = useFlightsStore.getState().flights;
-      let total = 0;
+      const prev = prevBytes.current;
+      const next = new Map<string, { tx: number; rx: number }>();
+      let upDelta = 0;
+      let downDelta = 0;
       for (const f of flights) {
-        if (f.phase === 'cruise' || f.phase === 'descent' || f.phase === 'hold') {
-          total += f.bytesPerSec;
+        next.set(f.id, { tx: f.bytesTx, rx: f.bytesRx });
+        const p = prev.get(f.id);
+        if (p) {
+          upDelta += Math.max(0, f.bytesTx - p.tx);
+          downDelta += Math.max(0, f.bytesRx - p.rx);
         }
       }
-      const down = total * 0.85;
-      const up = total * 0.15;
+      prevBytes.current = next;
+      const down = downDelta * 2;
+      const up = upDelta * 2;
       pushSample(inRef.current, down);
       pushSample(outRef.current, up);
       drawSpark(inCanvas.current, '#22c55e', inRef.current);

@@ -121,8 +121,10 @@ function makeFlight(now: number, inbound: boolean): SimFlight {
     protocol,
     detectedProtocol: proc.proto,
     port: proc.port,
-    srcIp: inbound ? remoteIp : home.ip,
-    dstIp: inbound ? home.ip : remoteIp,
+    // Local machine is always srcIp (matches live capture) — the flight card's
+    // "YOUR PC" must never show a remote IP. direction still drives the boards.
+    srcIp: home.ip,
+    dstIp: remoteIp,
     srcPort: inbound ? proc.port : ephemeral,
     dstPort: inbound ? ephemeral : proc.port,
     isIPv6: false,
