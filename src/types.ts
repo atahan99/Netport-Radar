@@ -114,3 +114,25 @@ export interface Flight {
   startedAt: number;
   hostnameResolved: boolean;
 }
+
+// ── WebSocket protocol (server → client only) ──────────────────────────────
+
+export interface BackendInfo {
+  capture: 'tshark' | 'tcpdump' | 'pcap';
+  dpiMode: 'full' | 'port-based';
+  iface: string;
+}
+
+export type FlightEvent =
+  | { event: 'opened'; flight: Flight }
+  | { event: 'updated'; id: string; patch: Partial<Flight> }
+  | { event: 'phase'; id: string; phase: FlightPhase }
+  | { event: 'closed'; id: string; bytesTotal: number; durationMs: number }
+  | { event: 'hostname'; id: string; hostname: string; sni?: string };
+
+export type ServerMessage =
+  | { type: 'init'; homeAirports: HomeAirport[]; backend: BackendInfo }
+  | { type: 'batch'; events: FlightEvent[] }
+  | { type: 'home_update'; homeAirports: HomeAirport[] }
+  | { type: 'error'; code: string; message: string };
+
