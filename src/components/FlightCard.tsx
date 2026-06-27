@@ -1,4 +1,6 @@
+import { useEffect, useRef } from 'react';
 import { X } from 'lucide-react';
+import { liveProgress } from '@/lib/anim';
 import { useFlightsStore } from '@/store/flights';
 import { useFiltersStore } from '@/store/filters';
 import { useBackendStore } from '@/store/backend';
@@ -35,7 +37,7 @@ interface ScreenPos {
 
 function anchoredPos(f: Flight, home: HomeAirport | undefined, is2d: boolean): ScreenPos | null {
   const ep = flightEndpoints(home, f);
-  const p = interpolateArc(ep.startLat, ep.startLng, ep.endLat, ep.endLng, f.arcProgress);
+  const p = interpolateArc(ep.startLat, ep.startLng, ep.endLat, ep.endLng, liveProgress(f));
   if (is2d) {
     const map = mapRef.current;
     if (!map) return null;
@@ -77,40 +79,58 @@ export default function FlightCard() {
           : 'port-based'
         : '—';
 
+  // Position the card imperatively so the anchored mode tracks its plane every
+  // frame without re-rendering the card content (which stays at the 10Hz store).
+  const cardRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = cardRef.current;
+    if (!el) return;
+    const dock = () => {
+      el.style.left = '50%';
+      el.style.top = '';
+      el.style.bottom = '16px';
+      el.style.transform = 'translateX(-50%)';
+      el.style.opacity = '1';
+      el.style.pointerEvents = 'auto';
+    };
+    if (mode === 'docked' || !selectedId) {
+      dock();
+      return;
+    }
+    let raf = 0;
+    const tick = () => {
+      const st = useFlightsStore.getState();
+      const fl = st.flights.find((x) => x.id === selectedId);
+      const sp = fl
+        ? anchoredPos(fl, st.homeAirports.find((a) => a.id === fl.homeAirportId), viewMode === '2d')
+        : null;
+      if (sp) {
+        el.style.left = `${sp.x}px`;
+        el.style.bottom = '';
+        el.style.top = `${sp.y}px`;
+        el.style.transform = 'translate(-50%, calc(-100% - 16px))';
+        el.style.opacity = String(sp.opacity);
+        el.style.pointerEvents = sp.opacity < 0.15 ? 'none' : 'auto';
+      } else {
+        dock(); // projection unavailable → fall back to the docked spot
+      }
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [mode, selectedId, viewMode]);
+
   const f = flights.find((x) => x.id === selectedId);
   if (!f) return null;
 
   const home = homeAirports.find((a) => a.id === f.homeAirportId);
-  const pct = Math.round(f.arcProgress * 100);
-
-  // Docked: centered on the bottom row, between the departures/arrivals boards.
-  const dockedStyle: React.CSSProperties = {
-    left: '50%',
-    bottom: 16,
-    transform: 'translateX(-50%)',
-  };
-  let style: React.CSSProperties;
-  if (mode === 'docked') {
-    style = dockedStyle;
-  } else {
-    const sp = anchoredPos(f, home, viewMode === '2d');
-    if (!sp) {
-      style = dockedStyle;
-    } else {
-      style = {
-        left: sp.x,
-        top: sp.y,
-        transform: 'translate(-50%, calc(-100% - 16px))',
-        opacity: sp.opacity,
-        pointerEvents: sp.opacity < 0.15 ? 'none' : 'auto',
-      };
-    }
-  }
+  const pct = Math.round(liveProgress(f) * 100);
 
   return (
     <div
+      ref={cardRef}
       className="pointer-events-auto absolute z-30 w-[320px] rounded-lg border border-zinc-700 bg-zinc-950/95 shadow-2xl backdrop-blur-sm"
-      style={style}
+      style={{ left: '50%', bottom: 16, transform: 'translateX(-50%)' }}
     >
       <div className="flex items-start justify-between gap-2 border-b border-zinc-800 px-3 py-2">
         <div className="flex items-center gap-2">

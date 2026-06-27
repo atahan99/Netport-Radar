@@ -17,11 +17,11 @@ import {
 import { lifecyclePose } from '@/lib/lifecycle';
 import { liveProgress } from '@/lib/anim';
 import { globeRef as sharedGlobeRef, type GlobeApi } from '@/lib/view-refs';
+import LeaderLine from '@/components/LeaderLine';
 import type { Flight, HomeAirport } from '@/types';
 
 const asF = (d: object) => d as Flight;
 const TRAIL_STEPS = 16;
-const GLOBE_R = 100;
 
 function rgba(hex: string, a: number): string {
   const h = hex.replace('#', '');
@@ -49,7 +49,6 @@ export default function GlobeView() {
   const homeAirports = useFlightsStore((s) => s.homeAirports);
   const selectedId = useFlightsStore((s) => s.selectedFlightId);
   const filters = useFiltersStore();
-  const cardMode = useFiltersStore((s) => s.cardAnchor3d);
   const idleTimer = useRef<number | undefined>(undefined);
 
   // Refs so accessors below can be identity-stable (never trigger layer rebuilds).
@@ -253,29 +252,6 @@ export default function GlobeView() {
     return () => cancelAnimationFrame(raf);
   }, [updateMesh]);
 
-  // Leader line from the selected plane to the docked card (screen space).
-  let leader: { x1: number; y1: number; x2: number; y2: number } | null = null;
-  if (selectedId && cardMode === 'docked' && globe.current) {
-    const f = flights.find((x) => x.id === selectedId);
-    const g = globe.current as unknown as GlobeApi;
-    if (f) {
-      const ep = flightEndpoints(homeById(f.homeAirportId), f);
-      const p = interpolateArc(ep.startLat, ep.startLng, ep.endLat, ep.endLng, liveProgress(f));
-      // Anchor to the base arc point (not the orbit offset) — keeps the leader
-      // line steady. (Phase 8 chunk 2 moves this to a per-frame component.)
-      const sc = g.getScreenCoords(p.lat, p.lng, 0.02);
-      let visible = true;
-      try {
-        const P = g.getCoords(p.lat, p.lng, 0);
-        const C = g.camera().position;
-        visible = P.x * C.x + P.y * C.y + P.z * C.z > GLOBE_R * GLOBE_R;
-      } catch {
-        /* keep */
-      }
-      if (visible) leader = { x1: sc.x, y1: sc.y, x2: size.w / 2, y2: size.h - 280 };
-    }
-  }
-
   return (
     <div className="absolute inset-0">
       <Globe
@@ -352,20 +328,7 @@ export default function GlobeView() {
         customThreeObject={customThreeObject}
         customThreeObjectUpdate={customThreeObjectUpdate}
       />
-      {leader && (
-        <svg className="pointer-events-none absolute inset-0 z-20" width={size.w} height={size.h}>
-          <line
-            x1={leader.x1}
-            y1={leader.y1}
-            x2={leader.x2}
-            y2={leader.y2}
-            stroke="rgba(255,255,255,0.45)"
-            strokeWidth={1}
-            strokeDasharray="3 3"
-          />
-          <circle cx={leader.x1} cy={leader.y1} r={3} fill="none" stroke="rgba(255,255,255,0.7)" />
-        </svg>
-      )}
+      <LeaderLine w={size.w} h={size.h} />
     </div>
   );
 }
