@@ -3,7 +3,8 @@
 Visualization-only local network monitor. Your machine is an airport; every
 connection is a flight flying an animated great-circle arc on a dark world map
 (or 3D globe) toward the remote IP's country. Read-only — no blocking, no
-firewall. Capture + DPI run locally.
+firewall. Capture + DPI run locally. Seven color themes recolor the whole scene
+(2D map **and** 3D globe), and the UI is keyboard- and screen-reader-navigable.
 
 <!-- Demo recording is a manual step: capture ~15s of real traffic (map + globe,
      a flight card open, the filter drawer) and save it to docs/demo.gif, then
@@ -129,8 +130,32 @@ This tool watches your traffic, so its own surface is kept deliberately small
 ## Controls
 
 - **Click** a plane or a departures/arrivals row → flight card
-- **[≡]** filters · **[⊞]** 2D / 3D · **pin** = flight-card anchor ↔ dock
+- **`[` / `]`** step backward / forward through the on-screen flights · **Esc** clears the selection
+- **[≡]** filters · **[⊞]** 2D / 3D · **theme** dropdown · **pin** = flight-card anchor ↔ dock · **[?]** legend
 - (demo only) **R** reconnect overlay · **B** burst ~200 flights
+
+## Themes
+
+Pick from the theme dropdown in the top-right strip (persists across reloads):
+
+| Theme | 2D map | 3D globe |
+| --- | --- | --- |
+| **Midnight** | native Carto dark-matter | matching dark vector globe |
+| **Matrix / Cyberpunk / Amber / Blueprint** | dark-matter genuinely recolored (background/water/land/lines/labels via paint overrides) | flat themed ocean + country land polygons + border lines |
+| **Arctic** | light Positron basemap | light vector globe |
+| **Satellite** | real Esri World Imagery | realistic NASA blue-marble earth |
+
+The 2D map is restyled at the MapLibre paint level (not a CSS tint); the 3D
+globe is the vector analogue (country polygons) for themed maps and a real photo
+for Satellite. Plane liveries keep their per-app brand colors in every theme.
+
+## Accessibility
+
+The map/globe is a `<canvas>` (opaque to assistive tech), so the data is also
+reachable without it: an off-screen scene description + a polite live region
+announce the selected flight; the Departures/Arrivals lists are `listbox`es with
+spoken per-row labels and arrow-key navigation; `[` / `]` step through flights
+globally; icon controls are labelled; and `prefers-reduced-motion` is honored.
 
 ## Troubleshooting
 
@@ -167,6 +192,9 @@ MapLibre GL (2D) · react-globe.gl + three (3D, lazy-loaded) · ws · geoip-lite
   (via [geoip-lite](https://github.com/geoip-lite/node-geoip))
 - Globe textures from [three-globe](https://github.com/vasturiano/three-globe)
   (MIT; NASA visible-earth imagery), vendored in `public/textures/`
+- Country shapes for the themed vector globe from
+  [Natural Earth](https://www.naturalearthdata.com/) (public domain; 110m
+  admin-0, slimmed), vendored in `public/geo/`
 - UI pieces: [shadcn/ui](https://ui.shadcn.com) · [lucide](https://lucide.dev)
   icons · [MapLibre GL JS](https://maplibre.org) ·
   [react-globe.gl](https://github.com/vasturiano/react-globe.gl)
@@ -175,11 +203,19 @@ Licensed MIT — see [LICENSE](LICENSE).
 
 ## Status
 
-**Shipped.** Built in ten phases: demo UI → 3D globe → live capture → process
+**Shipped.** Built in phases: demo UI → 3D globe → live capture → process
 attribution → polish → **security hardening** (loopback bind, WS origin/token
 gate) → **data honesty** (real ↓/↑, tcpdump closes, CGNAT, self-noise drops) →
 **perf architecture** (per-frame animation channel, HUD at 10Hz, eslint 0) →
-**test suite** (vitest, ~80 tests, 77% logic coverage) → **UX & a11y** (legend,
-filter chips, hover tooltips, keyboard nav, prefers-reduced-motion). Quality
-gate: `npm run check` (tsc ×2 + eslint + vitest). Electron was dropped — the app
-ships as `sudo npm start`.
+**test suite** (vitest) → **UX & a11y** (legend, filter chips, tooltips,
+keyboard nav, prefers-reduced-motion) → **7-theme system** (2D paint recolor +
+3D vector globe) → **UX-depth redesign** (flight card, filter drawer, scene
+announcer, theme-aware radar) → **CI + component tests** (104 tests). Quality
+gate: `npm run check` (tsc ×2 + eslint + vitest), enforced by GitHub Actions
+([.github/workflows/ci.yml](.github/workflows/ci.yml)). Electron was dropped —
+the app ships as `sudo npm start`.
+
+One known ceiling: the capture process stays root for its whole lifetime
+(privilege separation / drop-after-capture would shrink the blast radius of any
+server-side vuln); the server is loopback-bound with origin/token gating, so the
+practical risk for local use is low.
