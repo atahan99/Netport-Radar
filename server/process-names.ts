@@ -2,10 +2,12 @@
 // Maps a local socket (proto:port) to the owning process by polling lsof.
 // Uses -F field mode so command names with spaces ("Google Chrome Helper")
 // parse cleanly. Runs as root (sudo) → sees every process's sockets.
+// Rows linger PROCESS_RETAIN_MS after the socket closes so sub-2s flows still attribute.
+
 
 import { execSync } from 'child_process';
 import { normalizeProcess } from '../src/lib/livery';
-import { PROCESS_POLL_MS } from './config';
+import { PROCESS_POLL_MS, PROCESS_RETAIN_MS } from './config';
 
 export interface ProcEntry {
   command: string;
@@ -13,6 +15,8 @@ export interface ProcEntry {
 }
 
 let table = new Map<string, ProcEntry>();
+// Short-lived TCP flows can close between 2s lsof polls; retain the last mapping briefly.
+const staleRetain = new Map<string, { entry: ProcEntry; expiresAt: number }>();
 let timer: ReturnType<typeof setInterval> | undefined;
 let onPollCb: ((entries: [string, ProcEntry][]) => void) | undefined;
 
@@ -58,6 +62,16 @@ function poll(): void {
       }
     }
   }
+  const now = Date.now();
+  for (const [key, entry] of table) {
+    if (!next.has(key)) staleRetain.set(key, { entry, expiresAt: now + PROCESS_RETAIN_MS });
+  }
+  for (const [key, { entry, expiresAt }] of staleRetain) {
+    if (expiresAt <= now) staleRetain.delete(key);
+    else if (!next.has(key)) next.set(key, entry);
+  }
+  for (const key of next.keys()) staleRetain.delete(key);
+
   if (next.size > 0) {
     table = next;
     onPollCb?.([...next]); // privileged broker forwards this to the parent

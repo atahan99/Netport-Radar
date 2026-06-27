@@ -88,6 +88,7 @@ export interface Flight {
   dstLng: number;
   country: string; // ISO e.g. "US"
   countryFlag: string; // e.g. "🇺🇸"
+  geoConfidence: 'city' | 'country' | 'none'; // city=accurate, country=centroid guess, none=unknown shelf
   city: string;
   org: string;
   asn: string;

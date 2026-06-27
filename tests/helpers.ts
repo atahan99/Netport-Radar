@@ -22,6 +22,7 @@ export function makeFlight(over: Partial<Flight> = {}): Flight {
     dstLng: 0,
     country: 'US',
     countryFlag: '🇺🇸',
+    geoConfidence: 'city',
     city: 'X',
     org: 'Unknown',
     asn: '',
@@ -68,7 +69,7 @@ export function makeFilters(over: Partial<FilterState> = {}): FilterState {
     airportFilter: 'all',
     viewMode: '2d',
     filterDrawerOpen: false,
-    cardAnchor2d: 'anchored',
+    cardAnchor2d: 'docked',
     cardAnchor3d: 'docked',
     ...over,
   } as FilterState;

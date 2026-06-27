@@ -6,6 +6,7 @@ import { useFiltersStore } from '@/store/filters';
 import { getRenderQueueMemo } from '@/lib/render-queue';
 import { interpolateArc, arcPoints } from '@/lib/interpolate';
 import { flightEndpoints } from '@/lib/arc';
+import { correctedLngOffset, markerHeadingDeg } from '@/lib/mesh-orientation';
 import { liveProgress } from '@/lib/anim';
 import { lifecyclePose, type Pose } from '@/lib/lifecycle';
 import { reducedMotion } from '@/lib/motion';
@@ -14,6 +15,7 @@ import { THEME_BY_ID, type Theme } from '@/lib/themes';
 import { recolorValue } from '@/lib/map-recolor';
 import { AIRCRAFT_ICONS, AIRCRAFT_SIZE } from '@/lib/icons';
 import { mapRef } from '@/lib/view-refs';
+import { geoFlagLabel, geoMarkerOpacity } from '@/lib/geo-display';
 import type { Flight, HomeAirport } from '@/types';
 
 type PaintSnap = { prop: string; value: unknown };
@@ -76,7 +78,7 @@ function makeMarkerEl(f: Flight): HTMLDivElement {
   label.dataset.role = 'label';
   label.style.cssText =
     'position:absolute;left:50%;bottom:100%;transform:translateX(-50%);margin-bottom:3px;white-space:nowrap;font:600 9px ui-monospace,monospace;color:#d4d4d8;text-shadow:0 0 3px #000;pointer-events:none';
-  label.textContent = `${f.id} ${f.countryFlag}`;
+  label.textContent = `${f.id} ${geoFlagLabel(f)}`;
   wrap.append(plane, label);
   return wrap;
 }
@@ -99,7 +101,7 @@ function updateMarkerEl(
   const plane = el.querySelector('[data-role=plane]') as HTMLElement;
   const label = el.querySelector('[data-role=label]') as HTMLElement;
   const svg = plane.firstElementChild as SVGElement | null;
-  if (svg) svg.style.transform = `rotate(${heading - 90}deg)`;
+  if (svg) svg.style.transform = `rotate(${markerHeadingDeg(heading)}deg)`;
   if (el.dataset.color !== f.liveryColor) {
     el.dataset.color = f.liveryColor;
     const path = svg?.querySelector('path');
@@ -114,7 +116,7 @@ function updateMarkerEl(
     if (f.phase === 'landed' && el.dataset.phase && !reducedMotion()) spawnFlare(el, f.liveryColor);
     el.dataset.phase = f.phase;
   }
-  const opacity = f.aircraftType === 'stealth' ? pose.opacity * 0.6 : pose.opacity;
+  const opacity = (f.aircraftType === 'stealth' ? pose.opacity * 0.6 : pose.opacity) * geoMarkerOpacity(f);
   plane.style.opacity = String(opacity);
   plane.style.filter = selected ? `drop-shadow(0 0 5px ${f.liveryColor})` : 'none';
   plane.style.transform = `scale(${(selected ? 1.3 : 1) * pose.scale})`;
@@ -212,7 +214,7 @@ export default function MapView() {
         // stays roughly round away from the equator.
         const pose = lifecyclePose(f, now);
         const mLat = pos.lat + pose.dLat;
-        const mLng = pos.lng + pose.dLng / Math.max(0.3, Math.cos((pos.lat * Math.PI) / 180));
+        const mLng = pos.lng + correctedLngOffset(pose.dLng, pos.lat);
 
         let m = markers.get(f.id);
         if (!m) {

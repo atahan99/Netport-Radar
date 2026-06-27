@@ -26,6 +26,8 @@ import {
   callsign,
   resetCallsigns,
   flagEmoji,
+  ipv6Prefix64,
+  canonicalHost,
 } from './net-utils';
 
 // DoH can't be seen by DPI (the DNS lives inside TLS, so frame.protocols shows
@@ -77,6 +79,130 @@ export class FlowTracker {
     clearInterval(this.timer);
   }
 
+  /** Flow key — hostname merges v4/v6; IPv6 without host uses /64. */
+  private flowKey(
+    localIp: string,
+    localPort: number,
+    remoteIp: string,
+    remotePort: number,
+    proto: string,
+    host?: string,
+  ): string {
+    const h = canonicalHost(host, remoteIp);
+    if (h) return `${localIp}>host:${h}:${remotePort}:${proto}`;
+    const remoteId = remoteIp.includes(':') ? `v6:${ipv6Prefix64(remoteIp)}` : `v4:${remoteIp}`;
+    return `${localIp}:${localPort}>${remoteId}:${remotePort}:${proto}`;
+  }
+
+  private findFlow(
+    localIp: string,
+    localPort: number,
+    remoteIp: string,
+    remotePort: number,
+    proto: string,
+    host?: string,
+  ): { key: string; flow: Flow | undefined } {
+    // Literal 5-tuple wins — FIN/RST and data packets without SNI must stay on-session.
+    for (const [k, f] of this.flows) {
+      if (f.closedAt) continue;
+      if (
+        f.flight.srcIp === localIp &&
+        f.flight.srcPort === localPort &&
+        f.flight.dstIp === remoteIp &&
+        f.flight.dstPort === remotePort &&
+        f.flight.protocol === proto
+      ) {
+        return { key: k, flow: f };
+      }
+    }
+
+    const key = this.flowKey(localIp, localPort, remoteIp, remotePort, proto, host);
+    const direct = this.flows.get(key);
+    if (direct) return { key, flow: direct };
+
+    const h = canonicalHost(host, remoteIp);
+    if (h) {
+      for (const [k, f] of this.flows) {
+        if (f.closedAt) continue;
+        const fh = canonicalHost(f.flight.sni || f.flight.hostname, f.flight.dstIp);
+        if (
+          fh === h &&
+          f.flight.srcIp === localIp &&
+          f.flight.dstPort === remotePort &&
+          f.flight.protocol === proto
+        ) {
+          return { key: k, flow: f };
+        }
+      }
+    }
+    return { key, flow: undefined };
+  }
+
+  private absorbFlow(keep: Flow, absorb: Flow, absorbKey: string): void {
+    const k = keep.flight;
+    const a = absorb.flight;
+    k.bytesTx += a.bytesTx;
+    k.bytesRx += a.bytesRx;
+    k.bytesTotal += a.bytesTotal;
+    k.packetsTotal += a.packetsTotal;
+    if (a.isIPv6) k.isIPv6 = true;
+    keep.lastPacketAt = Math.max(keep.lastPacketAt, absorb.lastPacketAt);
+    keep.bps.push(...absorb.bps);
+    if (absorb.hostnameResolved && !keep.hostnameResolved) {
+      keep.flight.hostname = a.hostname;
+      keep.flight.sni = a.sni;
+      keep.hostnameResolved = true;
+      keep.flight.hostnameResolved = true;
+    }
+    if (absorb.processResolved && !keep.processResolved) {
+      keep.flight.process = a.process;
+      keep.flight.processRaw = a.processRaw;
+      keep.flight.pid = a.pid;
+      keep.flight.liveryColor = a.liveryColor;
+      keep.processResolved = true;
+    }
+    this.flows.delete(absorbKey);
+    if (absorb.opened) {
+      this.opts.onEvent({
+        event: 'closed',
+        id: a.id,
+        bytesTotal: a.bytesTotal,
+        durationMs: a.durationMs,
+      });
+    }
+  }
+
+  private tryRekeyByHostname(flow: Flow, key: string): void {
+    const f = flow.flight;
+    const h = canonicalHost(f.sni || f.hostname, f.dstIp);
+    if (!h) return;
+    const newKey = this.flowKey(f.srcIp, f.srcPort, f.dstIp, f.dstPort, f.protocol, h);
+    if (newKey === key) return;
+
+    const existing = this.flows.get(newKey);
+    if (existing && existing !== flow) {
+      this.absorbFlow(existing, flow, key);
+      return;
+    }
+
+    for (const [, other] of this.flows) {
+      if (other === flow || other.closedAt) continue;
+      const oh = canonicalHost(other.flight.sni || other.flight.hostname, other.flight.dstIp);
+      if (
+        oh === h &&
+        other.flight.srcIp === f.srcIp &&
+        other.flight.dstPort === f.dstPort &&
+        other.flight.protocol === f.protocol
+      ) {
+        this.absorbFlow(other, flow, key);
+        return;
+      }
+    }
+
+    this.flows.delete(key);
+    this.flows.set(newKey, flow);
+  }
+
   clear(): void {
     this.flows.clear();
     resetCallsigns();
@@ -95,19 +221,29 @@ export class FlowTracker {
     const remotePort = out ? p.dstPort : p.srcPort;
     // the one geo-lookup we make at boot shouldn't show up as a flight
     if (this.opts.selfProbeIps?.has(remoteIp)) return;
-    const key = `${localIp}:${localPort}>${remoteIp}:${remotePort}:${p.protocol}`;
+    const host = p.host;
 
     if (out) this.opts.onSourceIp(localIp);
 
-    let flow = this.flows.get(key);
+    const { key, flow: existing } = this.findFlow(
+      localIp,
+      localPort,
+      remoteIp,
+      remotePort,
+      p.protocol,
+      host,
+    );
+
+    let flow = existing;
     const now = Date.now();
     if (!flow) {
-      flow = this.create(p, localIp, localPort, remoteIp, remotePort, now);
+      flow = this.create(p, localIp, localPort, remoteIp, remotePort, now, key);
       this.flows.set(key, flow);
     }
     if (flow.closedAt) return; // ignore packets after close
 
     const f = flow.flight;
+    if (p.isIPv6) f.isIPv6 = true;
     if (out) f.bytesTx += p.length;
     else f.bytesRx += p.length;
     f.bytesTotal = f.bytesTx + f.bytesRx;
@@ -122,6 +258,7 @@ export class FlowTracker {
       f.hostnameResolved = true;
       if (flow.opened) this.opts.onEvent({ event: 'hostname', id: f.id, hostname: p.host, sni: p.host });
       this.maybeReclassifyDoH(flow);
+      this.tryRekeyByHostname(flow, key);
     }
     // data resumes → back to cruise
     if (flow.opened && f.phase === 'hold') this.setPhase(flow, 'cruise');
@@ -134,6 +271,7 @@ export class FlowTracker {
     remoteIp: string,
     remotePort: number,
     now: number,
+    flowKey: string,
   ): Flow {
     const geo = geoLookup(remoteIp);
     const home = this.resolveHome(localIp);
@@ -150,18 +288,21 @@ export class FlowTracker {
     let country: string;
     let city: string;
     let flag: string;
+    let geoConfidence: Flight['geoConfidence'];
     if (lan) {
       dstLat = home?.lat ?? 0;
       dstLng = home?.lng ?? 0;
       country = 'LAN';
       city = lanCity(remoteIp);
       flag = '';
+      geoConfidence = 'city';
     } else if (geo) {
       dstLat = geo.lat;
       dstLng = geo.lng;
       country = geo.country;
       city = geo.city || 'Unknown';
       flag = flagEmoji(geo.country);
+      geoConfidence = geo.confidence;
     } else {
       const j = hashIp(remoteIp);
       dstLat = -5 + (j % 1000) / 100; // -5..5
@@ -169,6 +310,7 @@ export class FlowTracker {
       country = '??';
       city = 'Unknown location';
       flag = '';
+      geoConfidence = 'none';
     }
 
     const flight: Flight = {
@@ -189,6 +331,7 @@ export class FlowTracker {
       dstLng,
       country,
       countryFlag: flag,
+      geoConfidence,
       city,
       org: geo?.org ?? 'Unknown',
       asn: geo?.asn ?? '',
@@ -213,7 +356,7 @@ export class FlowTracker {
     // async reverse DNS (in case no SNI/host comes through)
     if (!lan) {
       void resolveHostname(remoteIp).then((name) => {
-        const flow = this.flows.get(`${localIp}:${localPort}>${remoteIp}:${remotePort}:${p.protocol}`);
+        const flow = this.flows.get(flowKey);
         if (!flow || flow.hostnameResolved || name === remoteIp) return;
         flow.flight.hostname = name;
         flow.hostnameResolved = true;
@@ -223,6 +366,7 @@ export class FlowTracker {
         if (!flow.processResolved) flow.flight.liveryColor = liveryColor(name);
         if (flow.opened) this.opts.onEvent({ event: 'hostname', id: flow.flight.id, hostname: name });
         this.maybeReclassifyDoH(flow);
+        this.tryRekeyByHostname(flow, flowKey);
       });
     }
 

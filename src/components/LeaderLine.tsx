@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { useFlightsStore } from '@/store/flights';
 import { useFiltersStore } from '@/store/filters';
-import { globeRef } from '@/lib/view-refs';
+import { globeRef, flightCardRef } from '@/lib/view-refs';
 import { flightEndpoints } from '@/lib/arc';
 import { interpolateArc } from '@/lib/interpolate';
 import { liveProgress } from '@/lib/anim';
@@ -43,10 +43,13 @@ export default function LeaderLine({ w, h }: { w: number; h: number }) {
             /* keep */
           }
           if (visible) {
+            const card = flightCardRef.current?.getBoundingClientRect();
+            const x2 = card ? card.left + card.width / 2 : w / 2;
+            const y2 = card ? card.top : h - 16;
             line.setAttribute('x1', String(sc.x));
             line.setAttribute('y1', String(sc.y));
-            line.setAttribute('x2', String(w / 2));
-            line.setAttribute('y2', String(h - 280));
+            line.setAttribute('x2', String(x2));
+            line.setAttribute('y2', String(y2));
             dot.setAttribute('cx', String(sc.x));
             dot.setAttribute('cy', String(sc.y));
             show = true;

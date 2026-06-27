@@ -331,6 +331,8 @@ export async function resolveHostname(ip: string): Promise<string> {
   }
 }
 
+export type GeoConfidence = 'city' | 'country';
+
 export interface GeoInfo {
   lat: number;
   lng: number;
@@ -338,6 +340,7 @@ export interface GeoInfo {
   city: string;
   org: string;
   asn?: string;
+  confidence: GeoConfidence;
 }
 
 // Optional, off by default: point NETPORT_MMDB_CITY / NETPORT_MMDB_ASN at
@@ -372,33 +375,40 @@ export function geoLookup(ip: string): GeoInfo | null {
     const c = cityReader.get(ip);
     if (c?.location) {
       const asnNum = asnReader?.get(ip)?.autonomous_system_number;
+      const city = c.city?.names?.en ?? '';
       return {
         lat: c.location.latitude ?? 0,
         lng: c.location.longitude ?? 0,
         country: c.country?.iso_code ?? c.registered_country?.iso_code ?? 'XX',
-        city: c.city?.names?.en ?? '',
+        city,
         org: asnReader?.get(ip)?.autonomous_system_organization ?? 'Unknown',
         asn: asnNum ? `AS${asnNum}` : undefined,
+        confidence: city ? 'city' : 'country',
       };
     }
     // mmdb miss → fall through to geoip-lite below
   }
   const geo = geoip.lookup(ip);
   if (!geo) return null;
+  const city = geo.city ?? '';
   return {
     lat: geo.ll?.[0] ?? 0,
     lng: geo.ll?.[1] ?? 0,
     country: geo.country ?? 'XX',
-    city: geo.city ?? '',
+    city,
     org: 'Unknown',
+    confidence: city ? 'city' : 'country',
   };
 }
 
 // ── Home airport detection (cluster source IPs) ────────────────────────────
-export function detectHomeAirports(sourceIps: string[]): HomeAirport[] {
+export function detectHomeAirports(
+  sourceIps: string[],
+  lookup: (ip: string) => GeoInfo | null = geoLookup,
+): HomeAirport[] {
   const valid = sourceIps
     .map((ip) => {
-      const geo = geoLookup(ip);
+      const geo = lookup(ip);
       return geo ? { ip, ...geo } : null;
     })
     .filter((x): x is { ip: string } & GeoInfo => x !== null);

@@ -3,6 +3,7 @@ import { useFlightsStore } from '@/store/flights';
 import { locateFlight } from '@/lib/locate';
 import { PHASE_META } from '@/lib/phase';
 import { cn } from '@/lib/utils';
+import { geoFlagLabel } from '@/lib/geo-display';
 import type { Flight } from '@/types';
 
 const LANDED_LINGER_MS = 10_000;
@@ -84,7 +85,7 @@ export function Board({ direction, title }: { direction: 'outbound' | 'inbound';
                 {f.process !== '—' && <span className="text-zinc-300">{f.process} · </span>}
                 {f.hostname}
               </span>
-              <span className="shrink-0">{f.countryFlag}</span>
+              <span className="shrink-0 font-mono text-[10px]">{geoFlagLabel(f)}</span>
               <span className={cn('w-[54px] shrink-0 text-right', PHASE_META[f.phase].textClass)}>
                 {f.phase.toUpperCase()}
               </span>

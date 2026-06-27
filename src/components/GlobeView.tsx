@@ -5,6 +5,17 @@ import { useFlightsStore } from '@/store/flights';
 import { useFiltersStore } from '@/store/filters';
 import { getRenderQueueMemo } from '@/lib/render-queue';
 import { flightEndpoints } from '@/lib/arc';
+import {
+  resolveGlobeImage,
+  globeBorderColor,
+  useVectorPolygons,
+  polygonCapColor,
+  polygonSideColor,
+  polygonStrokeColor,
+  homeRingColor,
+  pathGradientColors,
+} from '@/lib/globe-color';
+import { correctedLngOffset, orientPlaneMesh } from '@/lib/mesh-orientation';
 import { interpolateArc, arcPoints, greatCircleKm, arcAltitude } from '@/lib/interpolate';
 import {
   createPlaneMesh,
@@ -26,23 +37,9 @@ import type { Flight, HomeAirport } from '@/types';
 const asF = (d: object) => d as Flight;
 const TRAIL_STEPS = 16;
 
-function rgba(hex: string, a: number): string {
-  const h = hex.replace('#', '');
-  return `rgba(${parseInt(h.slice(0, 2), 16)},${parseInt(h.slice(2, 4), 16)},${parseInt(h.slice(4, 6), 16)},${a.toFixed(3)})`;
-}
-
 // Stable empty list so react-globe.gl doesn't rebuild polygons every render when
 // the theme has no country layer (Midnight / Satellite keep the photo earth).
 const NO_POLYGONS: object[] = [];
-
-// Tiny solid-color image used as the globe texture for themed (vector) globes — a
-// flat ocean. Keeping globeImageUrl a real image URL (never undefined) is what
-// makes react-globe.gl reload reliably when switching back to a photo earth.
-function solidGlobeTexture(hex: string): string {
-  return `data:image/svg+xml,${encodeURIComponent(
-    `<svg xmlns="http://www.w3.org/2000/svg" width="4" height="4"><rect width="4" height="4" fill="${hex}"/></svg>`,
-  )}`;
-}
 
 interface DestDot {
   country: string;
@@ -53,11 +50,7 @@ interface DestDot {
 
 // Per-frame scratch — never allocate inside the mesh-update loop.
 const _pos = new THREE.Vector3();
-const _up = new THREE.Vector3();
-const _fwd = new THREE.Vector3();
-const _proj = new THREE.Vector3();
-const _right = new THREE.Vector3();
-const _m = new THREE.Matrix4();
+const _fwdHint = new THREE.Vector3();
 
 export default function GlobeView() {
   const globe = useRef<GlobeMethods | undefined>(undefined);
@@ -109,7 +102,7 @@ export default function GlobeView() {
   // (country land + borders are drawn as polygons below) — the 3D analogue of the
   // 2D vector map; Midnight/Satellite keep the realistic earth photo. It is always
   // a real image URL (never undefined) so react-globe.gl reloads it reliably.
-  const globeImage = theme.globeWater ? solidGlobeTexture(theme.globeWater) : theme.globeImageUrl;
+  const globeImage = resolveGlobeImage(theme);
 
   // Country shapes for the themed vector globe (land polygons + borders), vendored
   // locally. Fetched once when the globe mounts; absent until then (sphere only).
@@ -132,14 +125,14 @@ export default function GlobeView() {
   // destination dots on the surface still show through); border = the theme's 2D
   // line color (or accent) for a crisp themed outline.
   const landFill = theme.globeLand;
-  const borderColor = theme.globeBorder ?? theme.mapRecolor?.line ?? theme.accent;
-  const polygonCapColor = useCallback(
-    () => (landFill ? rgba(landFill, 0.82) : 'rgba(0,0,0,0)'),
+  const borderColor = globeBorderColor(theme);
+  const polygonCapColorFn = useCallback(
+    () => polygonCapColor(landFill),
     [landFill],
   );
-  const polygonStrokeColor = useCallback(() => borderColor, [borderColor]);
-  const polygonSideColor = useCallback(() => 'rgba(0,0,0,0)', []);
-  const polygonsData = theme.globeLand ? countries : NO_POLYGONS;
+  const polygonStrokeColorFn = useCallback(() => polygonStrokeColor(borderColor), [borderColor]);
+  const polygonSideColorFn = useCallback(() => polygonSideColor(), []);
+  const polygonsData = useVectorPolygons(theme) ? countries : NO_POLYGONS;
 
   useEffect(() => {
     const c = globe.current?.controls() as { autoRotate: boolean } | undefined;
@@ -205,13 +198,7 @@ export default function GlobeView() {
     },
     [homeById],
   );
-  const pathColor = useCallback((d: object): string[] => {
-    const f = asF(d);
-    const n = TRAIL_STEPS + 1;
-    const out: string[] = [];
-    for (let i = 0; i < n; i++) out.push(rgba(f.liveryColor, (i / (n - 1)) * 0.9));
-    return out;
-  }, []);
+  const pathColor = useCallback((d: object): string[] => pathGradientColors(asF(d).liveryColor, TRAIL_STEPS), []);
   const pathPointAlt = useCallback((p: unknown) => (p as number[])[2], []);
   const pathDashLength = useCallback((d: object) => (isVpn(asF(d)) ? 0.5 : 1), [isVpn]);
   const pathDashGap = useCallback((d: object) => (isVpn(asF(d)) ? 0.3 : 0), [isVpn]);
@@ -219,12 +206,12 @@ export default function GlobeView() {
   const ringLat = useCallback((d: object) => (d as HomeAirport).lat, []);
   const ringLng = useCallback((d: object) => (d as HomeAirport).lng, []);
   const ringColor = useCallback(
-    (d: object) => () => ((d as HomeAirport).isVpn ? '#8b5cf6' : '#ffffff'),
+    (d: object) => () => homeRingColor((d as HomeAirport).isVpn),
     [],
   );
   const labelText = useCallback((d: object) => (d as HomeAirport).label, []);
   const labelColor = useCallback(
-    (d: object) => ((d as HomeAirport).isVpn ? '#8b5cf6' : '#ffffff'),
+    (d: object) => homeRingColor((d as HomeAirport).isVpn),
     [],
   );
 
@@ -260,21 +247,14 @@ export default function GlobeView() {
       const alt = f.isLan ? 0.03 : arcAltitude(km) * Math.sin(progress * Math.PI) + 0.006;
       const pose = lifecyclePose(f, now);
       const oLat = pose.dLat;
-      const oLng = pose.dLng / Math.max(0.3, Math.cos((p.lat * Math.PI) / 180));
+      const oLng = correctedLngOffset(pose.dLng, p.lat);
       const c = g.getCoords(p.lat + oLat, p.lng + oLng, alt);
       _pos.set(c.x, c.y, c.z);
       o.position.copy(_pos);
-      _up.copy(_pos).normalize();
       const np = interpolateArc(ep.startLat, ep.startLng, ep.endLat, ep.endLng, Math.min(1, progress + 0.01));
       const nc = g.getCoords(np.lat + oLat, np.lng + oLng, alt);
-      _fwd.set(nc.x, nc.y, nc.z).sub(_pos);
-      _proj.copy(_up).multiplyScalar(_fwd.dot(_up));
-      _fwd.sub(_proj);
-      if (_fwd.lengthSq() < 1e-6) _fwd.set(0, 0, 1);
-      _fwd.normalize();
-      _right.crossVectors(_up, _fwd).normalize();
-      _m.makeBasis(_right, _up, _fwd);
-      o.quaternion.setFromRotationMatrix(_m);
+      _fwdHint.set(nc.x, nc.y, nc.z);
+      orientPlaneMesh(_pos, _fwdHint, o.quaternion);
       setPlaneSelected(o, f.id === selRef.current);
       // Taxi spool / landed shrink layers on top of the selection scale.
       o.scale.multiplyScalar(pose.scale);
@@ -365,9 +345,9 @@ export default function GlobeView() {
         atmosphereAltitude={0.16}
         /* themed vector globe — country land polygons + border strokes */
         polygonsData={polygonsData}
-        polygonCapColor={polygonCapColor}
-        polygonSideColor={polygonSideColor}
-        polygonStrokeColor={polygonStrokeColor}
+        polygonCapColor={polygonCapColorFn}
+        polygonSideColor={polygonSideColorFn}
+        polygonStrokeColor={polygonStrokeColorFn}
         polygonAltitude={0.006}
         polygonsTransitionDuration={0}
         onGlobeReady={() => {

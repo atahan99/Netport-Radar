@@ -53,7 +53,7 @@ export interface FilterState {
   filterDrawerOpen: boolean;
   legendOpen: boolean;
   // Flight-card position — per view so each can default differently
-  cardAnchor2d: CardAnchorMode; // default 'anchored'
+  cardAnchor2d: CardAnchorMode; // default 'docked'
   cardAnchor3d: CardAnchorMode; // default 'docked'
   // Actions
   toggle: (key: BooleanFilterKey) => void;
@@ -101,7 +101,7 @@ const DEFAULTS = {
   airportFilter: 'all' as AirportFilter,
   viewMode: '2d' as ViewMode,
   theme: 'midnight' as ThemeName,
-  cardAnchor2d: 'anchored' as CardAnchorMode,
+  cardAnchor2d: 'docked' as CardAnchorMode,
   cardAnchor3d: 'docked' as CardAnchorMode,
 };
 

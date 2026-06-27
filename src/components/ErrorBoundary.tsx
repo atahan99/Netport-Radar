@@ -1,5 +1,6 @@
 import { Component, type ReactNode } from 'react';
 import { useFiltersStore } from '@/store/filters';
+import { useDiagnosticsStore } from '@/store/diagnostics';
 
 interface Props {
   children: ReactNode;
@@ -18,6 +19,7 @@ export default class ErrorBoundary extends Component<Props, State> {
   }
 
   componentDidCatch(error: Error): void {
+    useDiagnosticsStore.getState().recordChunkError('View', error);
     console.error('[view] crashed:', error);
   }
 

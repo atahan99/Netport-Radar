@@ -134,6 +134,7 @@ function makeFlight(now: number, inbound: boolean): SimFlight {
     dstLng: dest.lng,
     country: dest.country,
     countryFlag: dest.flag,
+    geoConfidence: 'city',
     city: dest.city,
     org: proc.org,
     asn: proc.asn,
