@@ -69,8 +69,8 @@ export default function App() {
         NETPORT·RADAR
       </div>
 
-      {/* HUD overlays */}
-      <div className="absolute left-4 top-4 z-10">
+      {/* HUD overlays — radar hides on very narrow viewports */}
+      <div className="absolute left-4 top-4 z-10 hidden min-[700px]:block">
         <RadarHUD />
       </div>
       <div className="absolute right-4 top-4 z-20 flex flex-col items-end gap-2">
@@ -81,7 +81,7 @@ export default function App() {
       <div className="absolute bottom-4 left-4 z-10">
         <DeparturesBoard />
       </div>
-      <div className="absolute bottom-4 right-4 z-10">
+      <div className="absolute bottom-4 right-4 z-10 hidden min-[900px]:block">
         <ArrivalsBoard />
       </div>
 

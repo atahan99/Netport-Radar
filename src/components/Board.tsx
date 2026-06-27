@@ -54,7 +54,7 @@ export function Board({ direction, title }: { direction: 'outbound' | 'inbound';
   const homeOf = (f: Flight) => homeAirports.find((a) => a.id === f.homeAirportId);
 
   return (
-    <div className="w-[300px] rounded-lg border border-zinc-800 bg-black/85 backdrop-blur-sm">
+    <div className="w-[300px] rounded-lg border border-zinc-800 bg-black/85 backdrop-blur-sm max-[900px]:w-[260px]">
       <div className="flex items-center justify-between border-b border-zinc-800 px-3 py-1.5">
         <span className="font-mono text-[11px] font-semibold tracking-wider text-zinc-300">{title}</span>
         <span className="font-mono text-[10px] text-zinc-500">{rows.length}</span>
