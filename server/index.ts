@@ -12,6 +12,7 @@ import { execSync } from 'child_process';
 import * as os from 'os';
 import http from 'http';
 import net from 'net';
+import { lookup } from 'dns/promises';
 import { readFileSync, existsSync } from 'fs';
 import { join, extname } from 'path';
 import type { BackendInfo, HomeAirport } from '../src/types';
@@ -241,6 +242,19 @@ async function main(): Promise<void> {
   };
   let homeAirports: HomeAirport[] = [];
 
+  // The geo-lookup providers we contact at boot — their IPs must not become
+  // flights. Resolved once, best-effort.
+  const selfProbeIps = new Set<string>();
+  void (async () => {
+    for (const host of ['ipapi.co', 'ip-api.com', 'api.ipify.org']) {
+      try {
+        for (const a of await lookup(host, { all: true })) selfProbeIps.add(a.address);
+      } catch {
+        /* offline / no DNS — fine */
+      }
+    }
+  })();
+
   const ws = new WsHub(WS_PORT, () => ({ homeAirports, backend: backendInfo }), {
     host: BIND_HOST,
     token: TOKEN,
@@ -252,6 +266,7 @@ async function main(): Promise<void> {
       logEvent(e);
     },
     onSourceIp: () => {},
+    selfProbeIps,
   });
 
   const refreshHome = () =>

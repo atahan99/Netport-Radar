@@ -34,12 +34,35 @@ function isLoopback(ip: string): boolean {
   return ip.startsWith('127.') || ip === '::1' || ip.startsWith('0:0:0:0:0:0:0:1');
 }
 
+// 100.64.0.0/10 — carrier-grade NAT; this is where Tailscale/Headscale peers
+// live. Not geolocatable, so treat as LAN (orbit home) rather than geo-miss.
+function isCgnat(ip: string): boolean {
+  const m = ip.match(/^100\.(\d+)\./);
+  return !!m && +m[1] >= 64 && +m[1] <= 127;
+}
+
 function isPrivate(ip: string): boolean {
   if (ip.startsWith('10.') || ip.startsWith('192.168.') || ip.startsWith('169.254.')) return true;
+  if (isCgnat(ip)) return true;
+  if (ip.startsWith('198.18.') || ip.startsWith('198.19.')) return true; // 198.18/15 benchmarking
   const m = ip.match(/^172\.(\d+)\./);
   if (m && +m[1] >= 16 && +m[1] <= 31) return true;
   const l = ip.toLowerCase();
   return l.startsWith('fe80:') || l.startsWith('fc') || l.startsWith('fd');
+}
+
+// City label for a parked LAN destination.
+function lanCity(ip: string): string {
+  if (isCgnat(ip)) return 'Tailscale / CGNAT';
+  if (ip.startsWith('198.18.') || ip.startsWith('198.19.')) return 'Test range';
+  return 'Local network';
+}
+
+// Deterministic hash → stable "unknown shelf" coords for un-geolocatable public IPs.
+function hashIp(ip: string): number {
+  let h = 0;
+  for (let i = 0; i < ip.length; i++) h = (h * 31 + ip.charCodeAt(i)) >>> 0;
+  return h;
 }
 
 // Multicast (224–239.x, IPv6 ff00::/8) + broadcast — local discovery chatter
@@ -51,11 +74,24 @@ function isMulticast(ip: string): boolean {
   return ip.toLowerCase().startsWith('ff');
 }
 
+// 6 hex chars (24-bit) + a uniqueness set so callsigns never collide within a
+// session — a collision would corrupt client marker/selection state. The old
+// 16-bit space hit ~50% collision odds after a few hundred flights.
 let counter = 0;
+const usedCallsigns = new Set<string>();
 function callsign(proto: string): string {
   const prefix = (proto.replace(/[^A-Za-z]/g, '').slice(0, 3) || 'NET').toUpperCase();
-  const hex = ((counter++ * 2654435761) % 0x10000).toString(16).toUpperCase().padStart(4, '0');
-  return `${prefix}-${hex}`;
+  let cs: string;
+  do {
+    const hex = ((counter++ * 2654435761) >>> 0)
+      .toString(16)
+      .toUpperCase()
+      .padStart(6, '0')
+      .slice(-6);
+    cs = `${prefix}-${hex}`;
+  } while (usedCallsigns.has(cs));
+  usedCallsigns.add(cs);
+  return cs;
 }
 
 function flagEmoji(cc: string): string {
@@ -67,6 +103,7 @@ export interface FlowTrackerOpts {
   getHomeAirports: () => HomeAirport[];
   onEvent: (e: FlightEvent) => void;
   onSourceIp: (ip: string) => void; // feed home-airport detection
+  selfProbeIps?: Set<string>; // geo-lookup provider IPs — never become flights
 }
 
 export class FlowTracker {
@@ -83,17 +120,22 @@ export class FlowTracker {
 
   clear(): void {
     this.flows.clear();
+    usedCallsigns.clear();
   }
 
   ingest(p: RawPacket): void {
     // never shown/logged: loopback + multicast/broadcast (local discovery chatter)
     if (isLoopback(p.srcIp) || isLoopback(p.dstIp) || isMulticast(p.dstIp)) return;
+    // self-noise: reverse-DNS (ours + the OS's) shouldn't appear as DNS flights
+    if (p.host && (p.host.endsWith('.in-addr.arpa') || p.host.endsWith('.ip6.arpa'))) return;
 
     const out = p.direction === 'outbound';
     const localIp = out ? p.srcIp : p.dstIp;
     const localPort = out ? p.srcPort : p.dstPort;
     const remoteIp = out ? p.dstIp : p.srcIp;
     const remotePort = out ? p.dstPort : p.srcPort;
+    // the one geo-lookup we make at boot shouldn't show up as a flight
+    if (this.opts.selfProbeIps?.has(remoteIp)) return;
     const key = `${localIp}:${localPort}>${remoteIp}:${remotePort}:${p.protocol}`;
 
     if (out) this.opts.onSourceIp(localIp);
@@ -136,9 +178,38 @@ export class FlowTracker {
     const geo = geoLookup(remoteIp);
     const home = this.resolveHome(localIp);
     const lan = isPrivate(remoteIp);
-    // LAN dst has no GeoIP — park it at home (the LAN orbit visual is deferred).
-    const dstLat = geo ? geo.lat : home?.lat ?? 0;
-    const dstLng = geo ? geo.lng : home?.lng ?? 0;
+
+    // Destination placement (the display must not lie about where this goes):
+    //  • LAN → park at home, it orbits there (Phase 5 LAN orbit).
+    //  • known geo → real coords.
+    //  • public but un-geolocatable → a deterministic "unknown shelf" in the
+    //    mid-Atlantic with country '??' — honest "somewhere, location unknown",
+    //    never confused with home/LAN.
+    let dstLat: number;
+    let dstLng: number;
+    let country: string;
+    let city: string;
+    let flag: string;
+    if (lan) {
+      dstLat = home?.lat ?? 0;
+      dstLng = home?.lng ?? 0;
+      country = 'LAN';
+      city = lanCity(remoteIp);
+      flag = '';
+    } else if (geo) {
+      dstLat = geo.lat;
+      dstLng = geo.lng;
+      country = geo.country;
+      city = geo.city || 'Unknown';
+      flag = flagEmoji(geo.country);
+    } else {
+      const j = hashIp(remoteIp);
+      dstLat = -5 + (j % 1000) / 100; // -5..5
+      dstLng = -30 + (Math.floor(j / 1000) % 1600) / 100; // -30..-14
+      country = '??';
+      city = 'Unknown location';
+      flag = '';
+    }
 
     const flight: Flight = {
       id: callsign(p.detectedProtocol),
@@ -156,9 +227,9 @@ export class FlowTracker {
       homeAirportId: home?.id ?? 'primary',
       dstLat,
       dstLng,
-      country: geo?.country ?? (lan ? 'LAN' : 'XX'),
-      countryFlag: geo ? flagEmoji(geo.country) : '',
-      city: geo?.city || (lan ? 'Local network' : 'Unknown'),
+      country,
+      countryFlag: flag,
+      city,
       org: geo?.org ?? 'Unknown',
       asn: '',
       hostname: remoteIp,
