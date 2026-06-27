@@ -17,14 +17,13 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "check": "tsc -b && tsc -p tsconfig.server.json && eslint . && vitest run",
+    "replay": "tsx server/scripts/replay.ts",
     "preview": "vite preview"
   },
   "dependencies": {
     "@radix-ui/react-dialog": "^1.1.16",
-    "@radix-ui/react-radio-group": "^1.4.0",
     "@radix-ui/react-select": "^2.3.0",
     "@radix-ui/react-slot": "^1.2.5",
-    "@radix-ui/react-switch": "^1.3.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "geoip-lite": "^2.0.2",
