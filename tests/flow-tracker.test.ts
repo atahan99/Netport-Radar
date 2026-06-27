@@ -206,3 +206,78 @@ describe('metric cadence (Phase 8)', () => {
     tracker.stop();
   });
 });
+
+describe('IPv4/IPv6 flow merge', () => {
+  it('merges v4 and v6 packets to the same hostname into one flight', async () => {
+    const { events, tracker } = setup();
+    tracker.ingest(
+      pkt({
+        dstIp: '142.250.80.46',
+        srcPort: 51000,
+        host: 'dns.google',
+        length: 200,
+      }),
+    );
+    tracker.ingest(
+      pkt({
+        dstIp: '2001:4860:4860::8888',
+        srcPort: 52000,
+        isIPv6: true,
+        host: 'dns.google',
+        length: 300,
+      }),
+    );
+    await vi.advanceTimersByTimeAsync(300);
+    const opens = events.filter((e) => e.event === 'opened');
+    expect(opens).toHaveLength(1);
+    const f = opens[0].flight;
+    expect(f.bytesTotal).toBe(500);
+    expect(f.isIPv6).toBe(true);
+    tracker.stop();
+  });
+
+  it('merges IPv6 addresses in the same /64 without a hostname', async () => {
+    const { events, tracker } = setup();
+    tracker.ingest(
+      pkt({
+        dstIp: '2001:db8:1::1',
+        srcPort: 53000,
+        isIPv6: true,
+        length: 100,
+      }),
+    );
+    tracker.ingest(
+      pkt({
+        dstIp: '2001:db8:1::2',
+        srcPort: 53000,
+        isIPv6: true,
+        length: 150,
+      }),
+    );
+    await vi.advanceTimersByTimeAsync(2500);
+    const opens = events.filter((e) => e.event === 'opened');
+    expect(opens).toHaveLength(1);
+    expect(opens[0].flight.bytesTotal).toBe(250);
+    tracker.stop();
+  });
+});
+
+describe('geo confidence', () => {
+  it('marks country-only geoip-lite hits as low confidence', async () => {
+    const { events, tracker } = setup();
+    // 8.8.8.8 geolocates via bundled geoip-lite (country at minimum)
+    tracker.ingest(pkt({ dstIp: '8.8.8.8', host: 'dns.google' }));
+    await vi.advanceTimersByTimeAsync(300);
+    const f = opened(events)!.flight;
+    expect(['city', 'country']).toContain(f.geoConfidence);
+    tracker.stop();
+  });
+
+  it('unknown shelf uses geoConfidence none', async () => {
+    const { events, tracker } = setup();
+    tracker.ingest(pkt({ dstIp: '192.0.2.55', host: 'mystery' }));
+    await vi.advanceTimersByTimeAsync(300);
+    expect(opened(events)!.flight.geoConfidence).toBe('none');
+    tracker.stop();
+  });
+});

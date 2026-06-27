@@ -259,12 +259,36 @@ function dropPrivileges(target: { uid: number; gid: number }): void {
   }
 }
 
+function assertPrivilegesDropped(brokered: boolean, wsHub: WsHub): void {
+  if (typeof process.getuid !== 'function') return;
+  const uid = process.getuid();
+  console.log(`[security] effective uid=${uid}${brokered ? ' (brokered; capture in root child)' : ''}`);
+  if (!brokered) return;
+  if (uid === 0) {
+    console.error(
+      '[security] brokered run still executing as root after dropPrivileges — WS/HTTP must not stay root.',
+    );
+    wsHub.error(
+      'privilege_drop_failed',
+      'Server still running as root after privilege drop — fix sudo (SUDO_UID/GID) or use NETPORT_NO_PRIVDROP=1 intentionally.',
+    );
+  }
+}
+
 async function main(): Promise<void> {
   if (!(await isPortFree(WS_PORT))) {
     console.error(
       `\n[fatal] Port ${WS_PORT} is already in use — another netport-radar may be running.`,
     );
     console.error(`        Free it and retry:  lsof -ti tcp:${WS_PORT} | xargs kill\n`);
+    process.exit(1);
+  }
+
+  if (process.env.SERVE_DIST && !(await isPortFree(HTTP_PORT))) {
+    console.error(
+      `\n[fatal] Port ${HTTP_PORT} is already in use — another netport-radar may be running.`,
+    );
+    console.error(`        Free it and retry:  lsof -ti tcp:${HTTP_PORT} | xargs kill\n`);
     process.exit(1);
   }
 
@@ -466,6 +490,7 @@ async function main(): Promise<void> {
     };
     sendBroker({ t: 'init', backend, iface });
     dropPrivileges(target); // everything below this line runs as the invoking user
+    assertPrivilegesDropped(true, ws);
     return {
       switchTo: (next) => sendBroker({ t: 'switch', iface: next }),
       stop: () => {
@@ -479,6 +504,7 @@ async function main(): Promise<void> {
   const capture: CaptureControl = dropTarget
     ? startBrokeredCapture(dropTarget)
     : startInlineCapture();
+  if (!dropTarget) assertPrivilegesDropped(false, ws);
 
   ws.onClient = (msg, reply) => {
     if (msg.type === 'export') {

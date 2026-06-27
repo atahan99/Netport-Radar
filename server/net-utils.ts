@@ -73,3 +73,27 @@ export function flagEmoji(cc: string): string {
   if (!/^[A-Za-z]{2}$/.test(cc)) return '';
   return String.fromCodePoint(...[...cc.toUpperCase()].map((c) => 0x1f1e6 + c.charCodeAt(0) - 65));
 }
+
+/** Expand IPv6 and return the /64 prefix (lowercase, no zone id). */
+export function ipv6Prefix64(ip: string): string {
+  const bare = ip.split('%')[0].toLowerCase()
+  const parts = bare.split('::')
+  const head = parts[0] ? parts[0].split(':').filter(Boolean) : []
+  const tail = parts[1] ? parts[1].split(':').filter(Boolean) : []
+  const missing = 8 - head.length - tail.length
+  const full = [...head, ...Array(Math.max(0, missing)).fill('0'), ...tail]
+  while (full.length < 8) full.push('0')
+  return full
+    .slice(0, 4)
+    .map((p) => p.padStart(4, '0'))
+    .join(':')
+}
+
+/** Hostname suitable for flow dedup (skip IPs and PTR noise). */
+export function canonicalHost(host: string | undefined, remoteIp: string): string | undefined {
+  if (!host) return undefined
+  const h = host.toLowerCase().replace(/\.$/, '')
+  if (h === remoteIp.toLowerCase()) return undefined
+  if (h.endsWith('.in-addr.arpa') || h.endsWith('.ip6.arpa')) return undefined
+  return h
+}

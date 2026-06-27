@@ -27,5 +27,6 @@ export const CLOSED_TTL_MS = 30_000; // drop a closed flow from server memory
 export const EMIT_MIN_MS = 1000; // min interval between metric patches per flow
 export const TICK_MS = 250; // flow-tracker tick
 export const PROCESS_POLL_MS = 2000; // lsof poll interval
+export const PROCESS_RETAIN_MS = 3000; // keep lsof rows after socket close (sub-poll flows)
 export const WS_FLUSH_MS = 100; // WS event-batch flush interval
 export const WS_MAX_PAYLOAD = 4096; // max inbound client frame size

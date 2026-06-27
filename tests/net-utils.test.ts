@@ -8,6 +8,8 @@ import {
   flagEmoji,
   callsign,
   resetCallsigns,
+  ipv6Prefix64,
+  canonicalHost,
 } from '../server/net-utils';
 
 describe('isPrivate', () => {
@@ -84,5 +86,22 @@ describe('callsign', () => {
   it('falls back to NET prefix for empty/non-alpha protocol', () => {
     expect(callsign('')).toMatch(/^NET-[0-9A-F]{6}$/);
     expect(callsign('123')).toMatch(/^NET-[0-9A-F]{6}$/);
+  });
+});
+
+describe('ipv6Prefix64', () => {
+  it('normalizes compressed and expanded forms to the same /64', () => {
+    expect(ipv6Prefix64('2001:db8::1')).toBe('2001:0db8:0000:0000');
+    expect(ipv6Prefix64('2001:0db8:0000:0000:0000:0000:0000:0001')).toBe('2001:0db8:0000:0000');
+    expect(ipv6Prefix64('2606:2800:220:1::')).toBe('2606:2800:0220:0001');
+  });
+});
+
+describe('canonicalHost', () => {
+  it('rejects IPs, PTR noise, and empty hosts', () => {
+    expect(canonicalHost('8.8.8.8', '8.8.8.8')).toBeUndefined();
+    expect(canonicalHost('4.4.8.8.in-addr.arpa', '8.8.4.4')).toBeUndefined();
+    expect(canonicalHost(undefined, '1.2.3.4')).toBeUndefined();
+    expect(canonicalHost('dns.google.', '8.8.8.8')).toBe('dns.google');
   });
 });
