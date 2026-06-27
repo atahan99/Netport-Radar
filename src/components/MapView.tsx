@@ -376,7 +376,12 @@ export default function MapView() {
     if (t.mapStyle !== themeCtl.current.lastStyle) {
       themeCtl.current.lastStyle = t.mapStyle;
       map.setStyle(t.mapStyle as maplibregl.StyleSpecification);
-    } else if (map.isStyleLoaded()) {
+    } else {
+      // Recolor unconditionally. Do NOT gate on map.isStyleLoaded(): the arc
+      // GeoJSON source is re-set every ~100ms, so isStyleLoaded() is false most
+      // of the time and would skip the recolor (it only took effect on reload).
+      // setPaintProperty needs only the style to exist; recolorMap's per-layer
+      // try/catch swallows the rare "style not ready" case (initial mount).
       recolorMap(map, themeCtl.current.snaps, t);
       map.triggerRepaint();
     }
