@@ -31,12 +31,9 @@ function rgba(hex: string, a: number): string {
   return `rgba(${parseInt(h.slice(0, 2), 16)},${parseInt(h.slice(2, 4), 16)},${parseInt(h.slice(4, 6), 16)},${a.toFixed(3)})`;
 }
 
-// "#rrggbb" → normalized "r,g,b" for a GLSL vec3 literal.
-function hexToVec3(hex: string): string {
-  const h = hex.replace('#', '');
-  const c = (i: number) => (parseInt(h.slice(i, i + 2), 16) / 255).toFixed(4);
-  return `${c(0)},${c(2)},${c(4)}`;
-}
+// Stable empty list so react-globe.gl doesn't rebuild polygons every render when
+// the theme has no country layer (Midnight / Satellite keep the photo earth).
+const NO_POLYGONS: object[] = [];
 
 interface DestDot {
   country: string;
@@ -99,35 +96,17 @@ export default function GlobeView() {
     };
   });
 
-  // Recolor the 3D globe surface per theme. Themes with globeLand/globeWater get
-  // a two-color luminance remap of the earth texture in the fragment shader (the
-  // 3D analogue of the 2D map recolor); the rest keep the realistic texture and a
-  // multiply tint. globeMaterial() exists at runtime but isn't in the types.
+  // Themed globes are a flat ocean-colored sphere with country land drawn as
+  // polygons (see <Globe> below) — the 3D analogue of the 2D vector map. Midnight
+  // and Satellite have no globeWater, so they keep the realistic earth texture and
+  // just get a multiply tint. globeMaterial() exists at runtime but isn't typed.
   const applyGlobeTheme = useCallback(() => {
     const mat = (
       globe.current as unknown as { globeMaterial?: () => THREE.MeshPhongMaterial }
     )?.globeMaterial?.();
-    if (!mat) return;
-    // Distinct cache key per theme so three.js recompiles (it reuses the cached
-    // program if the key is unchanged, ignoring a new onBeforeCompile otherwise).
-    mat.customProgramCacheKey = () => `netport-globe-${theme.id}`;
-    if (theme.globeLand && theme.globeWater) {
-      const land = hexToVec3(theme.globeLand);
-      const water = hexToVec3(theme.globeWater);
-      mat.color.set('#ffffff'); // let the texture's luminance drive the remap
-      mat.onBeforeCompile = (shader) => {
-        shader.fragmentShader = shader.fragmentShader.replace(
-          '#include <map_fragment>',
-          `#include <map_fragment>
-           float _lum = dot(diffuseColor.rgb, vec3(0.299, 0.587, 0.114));
-           diffuseColor.rgb = mix(vec3(${water}), vec3(${land}), smoothstep(0.07, 0.22, _lum));`,
-        );
-      };
-    } else {
-      mat.onBeforeCompile = () => {}; // realistic earth (Midnight / Satellite)
-      mat.color.set(theme.globeTint);
-    }
-    mat.needsUpdate = true; // force a shader recompile with the new colors
+    if (!mat?.color) return;
+    mat.color.set(theme.globeWater ?? theme.globeTint);
+    mat.needsUpdate = true;
   }, [theme]);
 
   // Apply on theme change, and again after the async texture swap settles.
@@ -136,6 +115,36 @@ export default function GlobeView() {
     const t = setTimeout(applyGlobeTheme, 250);
     return () => clearTimeout(t);
   }, [applyGlobeTheme]);
+
+  // Country shapes for the themed vector globe (land polygons + borders), vendored
+  // locally. Fetched once when the globe mounts; absent until then (sphere only).
+  const [countries, setCountries] = useState<object[]>([]);
+  useEffect(() => {
+    let alive = true;
+    fetch('/geo/countries-110m.geojson')
+      .then((r) => r.json())
+      .then((d: { features?: object[] }) => {
+        if (alive) setCountries(d.features ?? []);
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  // Polygon colors — stable per theme so react-globe.gl doesn't rebuild every
+  // render. Land = globeLand fill (slightly translucent so the home ring and
+  // destination dots on the surface still show through); border = the theme's 2D
+  // line color (or accent) for a crisp themed outline.
+  const landFill = theme.globeLand;
+  const borderColor = theme.mapRecolor?.line ?? theme.accent;
+  const polygonCapColor = useCallback(
+    () => (landFill ? rgba(landFill, 0.82) : 'rgba(0,0,0,0)'),
+    [landFill],
+  );
+  const polygonStrokeColor = useCallback(() => borderColor, [borderColor]);
+  const polygonSideColor = useCallback(() => 'rgba(0,0,0,0)', []);
+  const polygonsData = theme.globeLand ? countries : NO_POLYGONS;
 
   useEffect(() => {
     const c = globe.current?.controls() as { autoRotate: boolean } | undefined;
@@ -354,11 +363,18 @@ export default function GlobeView() {
         ref={globe}
         width={size.w}
         height={size.h}
-        globeImageUrl={theme.globeImageUrl}
+        globeImageUrl={theme.globeLand ? undefined : theme.globeImageUrl}
         backgroundImageUrl="/textures/night-sky.png"
         backgroundColor="#000000"
         atmosphereColor={theme.atmosphere}
         atmosphereAltitude={0.16}
+        /* themed vector globe — country land polygons + border strokes */
+        polygonsData={polygonsData}
+        polygonCapColor={polygonCapColor}
+        polygonSideColor={polygonSideColor}
+        polygonStrokeColor={polygonStrokeColor}
+        polygonAltitude={0.006}
+        polygonsTransitionDuration={0}
         onGlobeReady={() => {
           const g = globe.current;
           if (!g) return;
