@@ -150,7 +150,11 @@ export default function MapView() {
         if (!home) continue;
         const ep = flightEndpoints(home, f);
         const prog = liveProgress(f); // per-frame animated value (not the 10Hz snapshot)
-        const pos = interpolateArc(ep.startLat, ep.startLng, ep.endLat, ep.endLng, prog);
+        // LAN flights orbit the home airport — pin them to home (don't interpolate a
+        // destination arc, which would fly them off to wherever dst landed).
+        const pos = f.isLan
+          ? { lat: home.lat, lng: home.lng, heading: 0 }
+          : interpolateArc(ep.startLat, ep.startLng, ep.endLat, ep.endLng, prog);
 
         // Lifecycle pose adds an orbit offset (hold-circle / LAN orbit) around the
         // projected position; the lng offset is widened by 1/cos(lat) so the circle
@@ -176,7 +180,7 @@ export default function MapView() {
         updateMarkerEl(m.getElement(), f, pos.heading, f.id === selectedFlightId, showLabels, pose);
         seen.add(f.id);
 
-        if (f.phase !== 'taxi' && f.phase !== 'landed') {
+        if (!f.isLan && f.phase !== 'taxi' && f.phase !== 'landed') {
           arcFeatures.push({
             type: 'Feature',
             properties: { color: f.liveryColor, vpn: home.isVpn },

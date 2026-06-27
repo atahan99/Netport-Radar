@@ -126,7 +126,9 @@ export default function GlobeView() {
       const q = getRenderQueueMemo(fl, ft);
       const set = [...q.mainQueue, ...q.dnsQueue];
       setTrailData(
-        set.filter((f) => f.phase === 'cruise' || f.phase === 'hold' || f.phase === 'descent'),
+        set.filter(
+          (f) => !f.isLan && (f.phase === 'cruise' || f.phase === 'hold' || f.phase === 'descent'),
+        ),
       );
       const m = new Map<string, DestDot>();
       for (const f of set) {
@@ -207,10 +209,15 @@ export default function GlobeView() {
   // by customThreeObjectUpdate (so a freshly-created mesh isn't a frame late).
   const updateMesh = useCallback(
     (o: THREE.Object3D, f: Flight, g: GlobeApi, now: number, progress: number) => {
-      const ep = flightEndpoints(homeById(f.homeAirportId), f);
-      const p = interpolateArc(ep.startLat, ep.startLng, ep.endLat, ep.endLng, progress);
-      const km = greatCircleKm(ep.startLat, ep.startLng, ep.endLat, ep.endLng);
-      const alt = arcAltitude(km) * Math.sin(progress * Math.PI) + 0.006;
+      const home = homeById(f.homeAirportId);
+      const ep = flightEndpoints(home, f);
+      // LAN flights orbit home (pinned), never fly out to a destination.
+      const p =
+        f.isLan && home
+          ? { lat: home.lat, lng: home.lng, heading: 0 }
+          : interpolateArc(ep.startLat, ep.startLng, ep.endLat, ep.endLng, progress);
+      const km = f.isLan ? 0 : greatCircleKm(ep.startLat, ep.startLng, ep.endLat, ep.endLng);
+      const alt = f.isLan ? 0.03 : arcAltitude(km) * Math.sin(progress * Math.PI) + 0.006;
       const pose = lifecyclePose(f, now);
       const oLat = pose.dLat;
       const oLng = pose.dLng / Math.max(0.3, Math.cos((p.lat * Math.PI) / 180));
