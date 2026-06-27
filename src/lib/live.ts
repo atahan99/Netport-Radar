@@ -7,7 +7,8 @@ import { useEffect } from 'react';
 import type { ClientMessage, Flight, FlightEvent, ServerMessage } from '@/types';
 import { useFlightsStore } from '@/store/flights';
 import { useConnectionStore } from '@/store/connection';
-import { useBackendStore } from '@/store/backend';
+import { useBackendStore, FATAL_CODES } from '@/store/backend';
+import { useToastStore } from '@/store/toasts';
 
 interface LiveFlight extends Flight {
   phaseStartedAt: number; // client clock (performance.now) when current phase began
@@ -137,7 +138,13 @@ export function useLiveFlights(enabled: boolean): void {
         } else if (msg.type === 'log') {
           downloadNdjson(msg.ndjson);
         } else if (msg.type === 'error') {
-          backend.setError({ code: msg.code, message: msg.message });
+          // Fatal (blocking overlay) + sudo banner stay sticky in the error
+          // field; transient capture hiccups surface as a self-dismissing toast.
+          if (FATAL_CODES.has(msg.code) || msg.code === 'capture_permission') {
+            backend.setError({ code: msg.code, message: msg.message });
+          } else {
+            useToastStore.getState().push(msg.message, 'warn');
+          }
         }
       };
       ws.onerror = () => ws?.close();
