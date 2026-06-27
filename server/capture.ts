@@ -44,6 +44,10 @@ export function tsharkPath(): string {
 
 // ── Backend auto-detect ────────────────────────────────────────────────────
 export function detectBackend(): CaptureBackend {
+  // Force a specific backend (testing the tcpdump path on a tshark machine,
+  // and the Phase 9 fixtures).
+  const override = process.env.NETPORT_BACKEND;
+  if (override === 'tshark' || override === 'tcpdump' || override === 'pcap') return override;
   try {
     execSync(`"${tsharkPath()}" --version`, { stdio: 'ignore' });
     return 'tshark';
@@ -120,7 +124,7 @@ export function startTshark(
   return proc;
 }
 
-function parseTsharkLine(line: string, localIps: Set<string>): RawPacket | null {
+export function parseTsharkLine(line: string, localIps: Set<string>): RawPacket | null {
   if (!line) return null;
   const f = line.split('\t');
   const at = (i: number) => f[i] ?? '';
@@ -208,7 +212,10 @@ export function startTcpdump(
   onPacket: (p: RawPacket) => void,
   onError: (msg: string) => void,
 ): ChildProcess {
-  const proc = spawn('tcpdump', ['-i', iface, '-l', '-n', '-q', '-t', '-U', 'not port 8090']);
+  // No -q: we need the "Flags [F./R.]" field to detect connection close
+  // (descent/landed). -q suppressed it, so closes only fired via the 120s
+  // stale timer.
+  const proc = spawn('tcpdump', ['-i', iface, '-l', '-n', '-t', '-U', 'not port 8090']);
   let buffer = '';
   proc.stdout.on('data', (chunk: Buffer) => {
     buffer += chunk.toString();
@@ -228,24 +235,48 @@ export function startTcpdump(
   return proc;
 }
 
-function parseTcpdumpLine(line: string, localIps: Set<string>): RawPacket | null {
-  const m = line.match(/IP(v6)?\s+([\d.a-f:]+)\.(\w+)\s+>\s+([\d.a-f:]+)\.(\w+):\s+(\w+)/i);
+// "1.2.3.4.443" → {ip:1.2.3.4, port:443}; "2001:db8::1.443" → {ip:2001:db8::1,
+// port:443}. Only called for TCP/UDP — ICMP endpoints have no trailing port and
+// would otherwise mis-split a v4 IP's last octet (1.2.3.4 → "1.2.3":4).
+function splitEndpoint(tok: string): { ip: string; port: number } {
+  const m = tok.match(/^(.*)\.(\d+)$/);
+  return m ? { ip: m[1], port: Number(m[2]) } : { ip: tok, port: 0 };
+}
+
+export function parseTcpdumpLine(line: string, localIps: Set<string>): RawPacket | null {
+  // "IP[6] <src[.port]> > <dst[.port]>: <rest>" — the prefix is stable across
+  // -q/non-q and protocol; the rest tells us protocol + flags + length.
+  const m = line.match(/^IP(6)?\s+(\S+)\s+>\s+(\S+):\s+(.*)$/);
   if (!m) return null;
-  const [, v6, srcIp, srcPortS, dstIp, dstPortS, protoHint] = m;
-  const srcPort = Number(srcPortS) || 0;
-  const dstPort = Number(dstPortS) || 0;
-  const protocol = /UDP/.test(protoHint) ? 'UDP' : /ICMP/.test(protoHint) ? 'ICMP' : 'TCP';
-  const lenMatch = line.match(/length (\d+)/);
+  const [, v6, srcTok, dstTok, rest] = m;
+
+  const flags = rest.match(/^Flags \[([^\]]*)\]/);
+  const protocol = flags ? 'TCP' : /^ICMP6?/i.test(rest) ? 'ICMP' : 'UDP';
+  const hasPort = protocol !== 'ICMP';
+  const src = hasPort ? splitEndpoint(srcTok) : { ip: srcTok, port: 0 };
+  const dst = hasPort ? splitEndpoint(dstTok) : { ip: dstTok, port: 0 };
+
+  // Prefer the well-known side: outbound uses dstPort, but an inbound packet's
+  // service port is srcPort — try both before falling back to generic TCP/UDP.
+  let detected = portBasedDetect(protocol, dst.port);
+  if ((detected === 'TCP' || detected === 'UDP') && src.port) {
+    const alt = portBasedDetect(protocol, src.port);
+    if (alt !== 'TCP' && alt !== 'UDP') detected = alt;
+  }
+
+  const lenMatch = rest.match(/length (\d+)/);
   return {
-    srcIp,
-    dstIp,
-    srcPort,
-    dstPort,
+    srcIp: src.ip,
+    dstIp: dst.ip,
+    srcPort: src.port,
+    dstPort: dst.port,
     protocol,
-    detectedProtocol: portBasedDetect(protocol, dstPort),
+    detectedProtocol: detected,
     length: lenMatch ? Number(lenMatch[1]) : 0,
-    direction: localIps.has(srcIp) ? 'outbound' : 'inbound',
-    isIPv6: !!v6 || srcIp.includes(':'),
+    direction: localIps.has(src.ip) ? 'outbound' : 'inbound',
+    isIPv6: !!v6 || src.ip.includes(':'),
+    tcpFin: flags ? flags[1].includes('F') : false,
+    tcpRst: flags ? flags[1].includes('R') : false,
   };
 }
 
