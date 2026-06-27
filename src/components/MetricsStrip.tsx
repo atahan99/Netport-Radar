@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Menu, Map as MapIcon, Globe, Pin, PinOff, Download, CircleHelp } from 'lucide-react';
 import { useFlightsStore } from '@/store/flights';
 import { useFiltersStore } from '@/store/filters';
-import { filterChips } from '@/components/FilterChips';
+import { filterChips } from '@/lib/filter-chips';
 import { useRenderQueue } from '@/hooks/useRenderQueue';
 import { useBackendStore } from '@/store/backend';
 import { Button } from '@/components/ui/button';
