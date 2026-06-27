@@ -79,6 +79,10 @@ export class WsHub {
       console.error('[ws]', err.message);
     });
     this.wss.on('connection', (ws) => {
+      // Per-connection socket errors (oversized frame → maxPayload, abrupt
+      // disconnect) must be handled or they bubble up as an uncaught exception
+      // and can crash the process. The socket is torn down by ws either way.
+      ws.on('error', () => {});
       const { homeAirports, backend } = this.getInit();
       this.sendTo(ws, { type: 'init', homeAirports, backend });
       if (this.lastError) this.sendTo(ws, { type: 'error', ...this.lastError });

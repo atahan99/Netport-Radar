@@ -17,6 +17,16 @@ import {
   EMIT_MIN_MS,
   TICK_MS,
 } from './config';
+import {
+  isLoopback,
+  isMulticast,
+  isPrivate,
+  lanCity,
+  hashIp,
+  callsign,
+  resetCallsigns,
+  flagEmoji,
+} from './net-utils';
 
 // DoH can't be seen by DPI (the DNS lives inside TLS, so frame.protocols shows
 // only tls/http2 → detected as HTTPS). When the SNI/hostname is a known public
@@ -48,75 +58,6 @@ interface Flow {
   bps: { t: number; bytes: number }[]; // rolling 3s window
 }
 
-function isLoopback(ip: string): boolean {
-  return ip.startsWith('127.') || ip === '::1' || ip.startsWith('0:0:0:0:0:0:0:1');
-}
-
-// 100.64.0.0/10 — carrier-grade NAT; this is where Tailscale/Headscale peers
-// live. Not geolocatable, so treat as LAN (orbit home) rather than geo-miss.
-function isCgnat(ip: string): boolean {
-  const m = ip.match(/^100\.(\d+)\./);
-  return !!m && +m[1] >= 64 && +m[1] <= 127;
-}
-
-function isPrivate(ip: string): boolean {
-  if (ip.startsWith('10.') || ip.startsWith('192.168.') || ip.startsWith('169.254.')) return true;
-  if (isCgnat(ip)) return true;
-  if (ip.startsWith('198.18.') || ip.startsWith('198.19.')) return true; // 198.18/15 benchmarking
-  const m = ip.match(/^172\.(\d+)\./);
-  if (m && +m[1] >= 16 && +m[1] <= 31) return true;
-  const l = ip.toLowerCase();
-  return l.startsWith('fe80:') || l.startsWith('fc') || l.startsWith('fd');
-}
-
-// City label for a parked LAN destination.
-function lanCity(ip: string): string {
-  if (isCgnat(ip)) return 'Tailscale / CGNAT';
-  if (ip.startsWith('198.18.') || ip.startsWith('198.19.')) return 'Test range';
-  return 'Local network';
-}
-
-// Deterministic hash → stable "unknown shelf" coords for un-geolocatable public IPs.
-function hashIp(ip: string): number {
-  let h = 0;
-  for (let i = 0; i < ip.length; i++) h = (h * 31 + ip.charCodeAt(i)) >>> 0;
-  return h;
-}
-
-// Multicast (224–239.x, IPv6 ff00::/8) + broadcast — local discovery chatter
-// (SSDP, mDNS, …). Dropped like loopback so it never becomes a "flight".
-function isMulticast(ip: string): boolean {
-  if (ip === '255.255.255.255') return true;
-  const first = parseInt(ip, 10);
-  if (first >= 224 && first <= 239) return true;
-  return ip.toLowerCase().startsWith('ff');
-}
-
-// 6 hex chars (24-bit) + a uniqueness set so callsigns never collide within a
-// session — a collision would corrupt client marker/selection state. The old
-// 16-bit space hit ~50% collision odds after a few hundred flights.
-let counter = 0;
-const usedCallsigns = new Set<string>();
-function callsign(proto: string): string {
-  const prefix = (proto.replace(/[^A-Za-z]/g, '').slice(0, 3) || 'NET').toUpperCase();
-  let cs: string;
-  do {
-    const hex = ((counter++ * 2654435761) >>> 0)
-      .toString(16)
-      .toUpperCase()
-      .padStart(6, '0')
-      .slice(-6);
-    cs = `${prefix}-${hex}`;
-  } while (usedCallsigns.has(cs));
-  usedCallsigns.add(cs);
-  return cs;
-}
-
-function flagEmoji(cc: string): string {
-  if (!/^[A-Za-z]{2}$/.test(cc)) return '';
-  return String.fromCodePoint(...[...cc.toUpperCase()].map((c) => 0x1f1e6 + c.charCodeAt(0) - 65));
-}
-
 export interface FlowTrackerOpts {
   getHomeAirports: () => HomeAirport[];
   onEvent: (e: FlightEvent) => void;
@@ -138,7 +79,7 @@ export class FlowTracker {
 
   clear(): void {
     this.flows.clear();
-    usedCallsigns.clear();
+    resetCallsigns();
   }
 
   ingest(p: RawPacket): void {

@@ -159,7 +159,7 @@ export function parseTsharkLine(line: string, localIps: Set<string>): RawPacket 
   };
 }
 
-function detectFromFrameProtos(
+export function detectFromFrameProtos(
   frameProtos: string,
   dstPort: number,
 ): { detectedProtocol: DetectedProtocol; protocol: string } {
@@ -281,7 +281,7 @@ export function parseTcpdumpLine(line: string, localIps: Set<string>): RawPacket
   };
 }
 
-function portBasedDetect(protocol: string, port: number): DetectedProtocol {
+export function portBasedDetect(protocol: string, port: number): DetectedProtocol {
   if (port === 53) return 'DNS';
   if (port === 5353) return 'mDNS';
   if (port === 853) return protocol === 'UDP' ? 'DoQ' : 'DoT';
