@@ -1,0 +1,251 @@
+import { useEffect, useRef } from 'react';
+import maplibregl from 'maplibre-gl';
+import type { Feature, FeatureCollection } from 'geojson';
+import { useFlightsStore } from '@/store/flights';
+import { useFiltersStore } from '@/store/filters';
+import { getRenderQueue } from '@/lib/render-queue';
+import { interpolateArc, arcPoints } from '@/lib/interpolate';
+import { flightEndpoints } from '@/lib/arc';
+import { AIRCRAFT_ICONS, AIRCRAFT_SIZE } from '@/lib/icons';
+import { mapRef } from '@/lib/view-refs';
+import type { Flight, HomeAirport } from '@/types';
+
+const STYLE = 'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json';
+
+function iconSvg(f: Flight, size: number): string {
+  const icon = AIRCRAFT_ICONS[f.aircraftType];
+  const fill = icon.mode === 'fill' ? f.liveryColor : 'none';
+  const stroke = icon.mode === 'stroke' ? f.liveryColor : 'none';
+  const sw = f.aircraftType === 'ambulance' ? 3 : 2.2;
+  return `<svg width="${size}" height="${size}" viewBox="0 0 24 24" style="display:block;overflow:visible;transition:transform .1s linear"><path d="${icon.d}" fill="${fill}" stroke="${stroke}" stroke-width="${sw}" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+}
+
+function makeMarkerEl(f: Flight): HTMLDivElement {
+  const wrap = document.createElement('div');
+  wrap.style.cssText = 'position:relative;cursor:pointer;will-change:transform';
+  const plane = document.createElement('div');
+  plane.dataset.role = 'plane';
+  plane.style.cssText =
+    'display:flex;align-items:center;justify-content:center;transition:transform .15s,filter .15s';
+  plane.innerHTML = iconSvg(f, AIRCRAFT_SIZE[f.aircraftType]);
+  const label = document.createElement('div');
+  label.dataset.role = 'label';
+  label.style.cssText =
+    'position:absolute;left:50%;bottom:100%;transform:translateX(-50%);margin-bottom:3px;white-space:nowrap;font:600 9px ui-monospace,monospace;color:#d4d4d8;text-shadow:0 0 3px #000;pointer-events:none';
+  label.textContent = `${f.id} ${f.countryFlag}`;
+  wrap.append(plane, label);
+  return wrap;
+}
+
+function updateMarkerEl(
+  el: HTMLElement,
+  f: Flight,
+  heading: number,
+  selected: boolean,
+  showLabel: boolean,
+): void {
+  const plane = el.querySelector('[data-role=plane]') as HTMLElement;
+  const label = el.querySelector('[data-role=label]') as HTMLElement;
+  const svg = plane.firstElementChild as SVGElement | null;
+  if (svg) svg.style.transform = `rotate(${heading - 90}deg)`;
+  let opacity = 1;
+  if (f.aircraftType === 'stealth') opacity = 0.6;
+  if (f.phase === 'taxi') opacity = 0.85;
+  if (f.phase === 'landed') opacity = 0.3;
+  plane.style.opacity = String(opacity);
+  plane.style.filter = selected ? `drop-shadow(0 0 5px ${f.liveryColor})` : 'none';
+  plane.style.transform = selected ? 'scale(1.3)' : 'scale(1)';
+  label.style.display = showLabel ? 'block' : 'none';
+  label.style.color = selected ? '#fff' : '#d4d4d8';
+}
+
+function makeHomeEl(home: HomeAirport): HTMLDivElement {
+  const color = home.isVpn ? '#8b5cf6' : '#ffffff';
+  const wrap = document.createElement('div');
+  wrap.style.cssText = 'position:relative;width:0;height:0;pointer-events:none';
+  for (let i = 0; i < 3; i++) {
+    const ring = document.createElement('div');
+    ring.style.cssText = `position:absolute;width:64px;height:64px;margin:-32px 0 0 -32px;border-radius:50%;border:1.5px solid ${color};animation:ring-pulse 3s ease-out ${i}s infinite`;
+    wrap.appendChild(ring);
+  }
+  const dot = document.createElement('div');
+  dot.style.cssText = `position:absolute;left:-3px;top:-3px;width:6px;height:6px;border-radius:50%;background:${color};box-shadow:0 0 6px ${color}`;
+  const label = document.createElement('div');
+  label.style.cssText = `position:absolute;left:50%;top:12px;transform:translateX(-50%);white-space:nowrap;font:600 10px ui-sans-serif,system-ui;color:${color};text-shadow:0 0 4px #000`;
+  label.textContent = home.label;
+  wrap.append(dot, label);
+  return wrap;
+}
+
+export default function MapView() {
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!containerRef.current) return;
+    const map = new maplibregl.Map({
+      container: containerRef.current,
+      style: STYLE,
+      center: [15, 30],
+      zoom: 2,
+      attributionControl: false,
+      maxZoom: 12,
+    });
+    mapRef.current = map;
+
+    const markers = new Map<string, maplibregl.Marker>();
+    const homeMarkers: maplibregl.Marker[] = [];
+    let loaded = false;
+
+    function renderHome(homeAirports: HomeAirport[]) {
+      for (const m of homeMarkers) m.remove();
+      homeMarkers.length = 0;
+      for (const a of homeAirports) {
+        const m = new maplibregl.Marker({ element: makeHomeEl(a) })
+          .setLngLat([a.lng, a.lat])
+          .addTo(map);
+        homeMarkers.push(m);
+      }
+    }
+
+    function update() {
+      if (!loaded) return;
+      const { flights, homeAirports, selectedFlightId } = useFlightsStore.getState();
+      const filters = useFiltersStore.getState();
+      const { mainQueue, dnsQueue } = getRenderQueue(flights, filters);
+      const rendered = [...mainQueue, ...dnsQueue];
+      const showLabels = map.getZoom() >= 3;
+
+      const arcFeatures: Feature[] = [];
+      const countryAgg = new Map<string, { lng: number; lat: number; count: number }>();
+      const seen = new Set<string>();
+
+      for (const f of rendered) {
+        const home = homeAirports.find((a) => a.id === f.homeAirportId);
+        if (!home) continue;
+        const ep = flightEndpoints(home, f);
+        const pos = interpolateArc(ep.startLat, ep.startLng, ep.endLat, ep.endLng, f.arcProgress);
+
+        let m = markers.get(f.id);
+        if (!m) {
+          const el = makeMarkerEl(f);
+          el.addEventListener('click', (ev) => {
+            ev.stopPropagation();
+            useFlightsStore.getState().selectFlight(f.id);
+          });
+          m = new maplibregl.Marker({ element: el }).setLngLat([pos.lng, pos.lat]).addTo(map);
+          markers.set(f.id, m);
+        } else {
+          m.setLngLat([pos.lng, pos.lat]);
+        }
+        updateMarkerEl(m.getElement(), f, pos.heading, f.id === selectedFlightId, showLabels);
+        seen.add(f.id);
+
+        if (f.phase !== 'taxi' && f.phase !== 'landed') {
+          arcFeatures.push({
+            type: 'Feature',
+            properties: { color: f.liveryColor, vpn: home.isVpn },
+            geometry: {
+              type: 'LineString',
+              coordinates: arcPoints(ep.startLat, ep.startLng, ep.endLat, ep.endLng, f.arcProgress),
+            },
+          });
+        }
+        if (!countryAgg.has(f.country)) {
+          countryAgg.set(f.country, { lng: f.dstLng, lat: f.dstLat, count: 0 });
+        }
+        countryAgg.get(f.country)!.count++;
+      }
+
+      for (const [id, m] of markers) {
+        if (!seen.has(id)) {
+          m.remove();
+          markers.delete(id);
+        }
+      }
+
+      const arcSrc = map.getSource('arcs') as maplibregl.GeoJSONSource | undefined;
+      arcSrc?.setData({ type: 'FeatureCollection', features: arcFeatures } as FeatureCollection);
+
+      const destFeatures: Feature[] = [];
+      for (const [country, agg] of countryAgg) {
+        destFeatures.push({
+          type: 'Feature',
+          properties: { country, count: agg.count },
+          geometry: { type: 'Point', coordinates: [agg.lng, agg.lat] },
+        });
+      }
+      const destSrc = map.getSource('dests') as maplibregl.GeoJSONSource | undefined;
+      destSrc?.setData({ type: 'FeatureCollection', features: destFeatures } as FeatureCollection);
+    }
+
+    map.on('load', () => {
+      loaded = true;
+      map.addSource('arcs', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
+      map.addSource('dests', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
+      map.addLayer({
+        id: 'arcs-solid',
+        type: 'line',
+        source: 'arcs',
+        filter: ['==', ['get', 'vpn'], false],
+        layout: { 'line-cap': 'round', 'line-join': 'round' },
+        paint: { 'line-color': ['get', 'color'], 'line-width': 1.5, 'line-opacity': 0.6 },
+      });
+      map.addLayer({
+        id: 'arcs-vpn',
+        type: 'line',
+        source: 'arcs',
+        filter: ['==', ['get', 'vpn'], true],
+        layout: { 'line-cap': 'round', 'line-join': 'round' },
+        paint: {
+          'line-color': ['get', 'color'],
+          'line-width': 1.5,
+          'line-opacity': 0.6,
+          'line-dasharray': [2, 2],
+        },
+      });
+      map.addLayer({
+        id: 'dests',
+        type: 'circle',
+        source: 'dests',
+        paint: {
+          'circle-radius': ['interpolate', ['linear'], ['get', 'count'], 1, 3, 20, 7],
+          'circle-color': 'rgba(255,255,255,0.55)',
+          'circle-stroke-color': 'rgba(255,255,255,0.25)',
+          'circle-stroke-width': 1,
+        },
+      });
+      map.on('click', 'dests', (e) => {
+        const c = e.features?.[0]?.properties?.country;
+        if (typeof c === 'string') useFiltersStore.getState().setIsolatedCountry(c);
+      });
+      map.on('mouseenter', 'dests', () => (map.getCanvas().style.cursor = 'pointer'));
+      map.on('mouseleave', 'dests', () => (map.getCanvas().style.cursor = ''));
+      renderHome(useFlightsStore.getState().homeAirports);
+      update();
+    });
+
+    map.on('click', () => useFlightsStore.getState().selectFlight(null));
+
+    const unsubFlights = useFlightsStore.subscribe((st, prev) => {
+      if (st.homeAirports !== prev.homeAirports) renderHome(st.homeAirports);
+      if (st.flights !== prev.flights || st.selectedFlightId !== prev.selectedFlightId) update();
+    });
+    const unsubFilters = useFiltersStore.subscribe(() => update());
+
+    return () => {
+      unsubFlights();
+      unsubFilters();
+      mapRef.current = null;
+      map.remove();
+    };
+  }, []);
+
+  // Outer div owns the absolute-inset sizing; the inner div is MapLibre's
+  // container (MapLibre forces position:relative on it, which would cancel
+  // inset-0 if applied directly — so it gets h-full/w-full instead).
+  return (
+    <div className="absolute inset-0">
+      <div ref={containerRef} className="h-full w-full" />
+    </div>
+  );
+}
