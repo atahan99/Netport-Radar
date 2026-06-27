@@ -15,6 +15,7 @@ import {
   updateLandingFlare,
 } from '@/lib/globe-meshes';
 import { lifecyclePose } from '@/lib/lifecycle';
+import { liveProgress } from '@/lib/anim';
 import { globeRef as sharedGlobeRef, type GlobeApi } from '@/lib/view-refs';
 import type { Flight, HomeAirport } from '@/types';
 
@@ -61,6 +62,12 @@ export default function GlobeView() {
     [],
   );
 
+  // Mesh registry: three.js plane objects keyed by flightId, written when the
+  // custom layer creates them and read by the per-frame ticker below. renderedRef
+  // mirrors the (now-10Hz) customLayerData so the ticker knows which flights exist.
+  const meshById = useRef(new Map<string, THREE.Object3D>());
+  const renderedRef = useRef<Flight[]>([]);
+
   const [size, setSize] = useState({ w: window.innerWidth, h: window.innerHeight });
   useEffect(() => {
     const onResize = () => setSize({ w: window.innerWidth, h: window.innerHeight });
@@ -87,6 +94,9 @@ export default function GlobeView() {
     [flights, filters],
   );
   const rendered = useMemo(() => [...mainQueue, ...dnsQueue], [mainQueue, dnsQueue]);
+  useEffect(() => {
+    renderedRef.current = rendered;
+  }, [rendered]);
 
   const [trailData, setTrailData] = useState<Flight[]>([]);
   const [destData, setDestData] = useState<DestDot[]>([]);
@@ -107,6 +117,10 @@ export default function GlobeView() {
       }
       setDestData([...m.values()]);
       disposeUnusedMaterials(new Set(fl.map((f) => f.liveryColor)));
+      // Drop mesh-registry entries for flights three-globe has removed from the
+      // custom layer (it disposes the Object3D; we just release our reference).
+      const liveIds = new Set(renderedRef.current.map((f) => f.id));
+      for (const k of meshById.current.keys()) if (!liveIds.has(k)) meshById.current.delete(k);
     };
     const id = setInterval(tick, 90);
     tick();
@@ -161,20 +175,23 @@ export default function GlobeView() {
     [],
   );
 
-  const customThreeObject = useCallback((d: object) => createPlaneMesh(asF(d)), []);
-  const customThreeObjectUpdate = useCallback(
-    (obj: object, d: object) => {
-      const o = obj as THREE.Object3D;
-      const f = asF(d);
-      const g = globe.current as unknown as GlobeApi | null;
-      if (!g) return;
+  const customThreeObject = useCallback((d: object) => {
+    const f = asF(d);
+    const mesh = createPlaneMesh(f);
+    mesh.userData.flightId = f.id;
+    meshById.current.set(f.id, mesh);
+    return mesh;
+  }, []);
+
+  // Position/orient/scale/flare a plane mesh for `progress` along its arc. Driven
+  // every frame by the rAF ticker (with arcProgressLive) and once on data-change
+  // by customThreeObjectUpdate (so a freshly-created mesh isn't a frame late).
+  const updateMesh = useCallback(
+    (o: THREE.Object3D, f: Flight, g: GlobeApi, now: number, progress: number) => {
       const ep = flightEndpoints(homeById(f.homeAirportId), f);
-      const p = interpolateArc(ep.startLat, ep.startLng, ep.endLat, ep.endLng, f.arcProgress);
+      const p = interpolateArc(ep.startLat, ep.startLng, ep.endLat, ep.endLng, progress);
       const km = greatCircleKm(ep.startLat, ep.startLng, ep.endLat, ep.endLng);
-      const alt = arcAltitude(km) * Math.sin(f.arcProgress * Math.PI) + 0.006;
-      // Lifecycle orbit: offset lat/lng (hold-circle / LAN orbit) by the same
-      // amount on both samples so the heading basis below stays stable.
-      const now = performance.now();
+      const alt = arcAltitude(km) * Math.sin(progress * Math.PI) + 0.006;
       const pose = lifecyclePose(f, now);
       const oLat = pose.dLat;
       const oLng = pose.dLng / Math.max(0.3, Math.cos((p.lat * Math.PI) / 180));
@@ -182,7 +199,7 @@ export default function GlobeView() {
       _pos.set(c.x, c.y, c.z);
       o.position.copy(_pos);
       _up.copy(_pos).normalize();
-      const np = interpolateArc(ep.startLat, ep.startLng, ep.endLat, ep.endLng, Math.min(1, f.arcProgress + 0.01));
+      const np = interpolateArc(ep.startLat, ep.startLng, ep.endLat, ep.endLng, Math.min(1, progress + 0.01));
       const nc = g.getCoords(np.lat + oLat, np.lng + oLng, alt);
       _fwd.set(nc.x, nc.y, nc.z).sub(_pos);
       _proj.copy(_up).multiplyScalar(_fwd.dot(_up));
@@ -206,6 +223,36 @@ export default function GlobeView() {
     [homeById],
   );
 
+  const customThreeObjectUpdate = useCallback(
+    (obj: object, d: object) => {
+      const g = globe.current as unknown as GlobeApi | null;
+      if (!g) return;
+      const f = asF(d);
+      updateMesh(obj as THREE.Object3D, f, g, performance.now(), liveProgress(f));
+    },
+    [updateMesh],
+  );
+
+  // Per-frame mesh ticker — runs every frame regardless of the 10Hz store so the
+  // fleet animates smoothly. Reads arcProgressLive (the animation channel).
+  useEffect(() => {
+    let raf = 0;
+    const frame = () => {
+      const g = globe.current as unknown as GlobeApi | null;
+      if (g) {
+        const now = performance.now();
+        const meshes = meshById.current;
+        for (const f of renderedRef.current) {
+          const o = meshes.get(f.id);
+          if (o) updateMesh(o, f, g, now, liveProgress(f));
+        }
+      }
+      raf = requestAnimationFrame(frame);
+    };
+    raf = requestAnimationFrame(frame);
+    return () => cancelAnimationFrame(raf);
+  }, [updateMesh]);
+
   // Leader line from the selected plane to the docked card (screen space).
   let leader: { x1: number; y1: number; x2: number; y2: number } | null = null;
   if (selectedId && cardMode === 'docked' && globe.current) {
@@ -213,9 +260,9 @@ export default function GlobeView() {
     const g = globe.current as unknown as GlobeApi;
     if (f) {
       const ep = flightEndpoints(homeById(f.homeAirportId), f);
-      const p = interpolateArc(ep.startLat, ep.startLng, ep.endLat, ep.endLng, f.arcProgress);
+      const p = interpolateArc(ep.startLat, ep.startLng, ep.endLat, ep.endLng, liveProgress(f));
       // Anchor to the base arc point (not the orbit offset) — keeps the leader
-      // line steady, and avoids an impure clock read during render.
+      // line steady. (Phase 8 chunk 2 moves this to a per-frame component.)
       const sc = g.getScreenCoords(p.lat, p.lng, 0.02);
       let visible = true;
       try {
