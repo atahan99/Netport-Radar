@@ -14,6 +14,7 @@ export interface GlobeApi {
   getScreenCoords: (lat: number, lng: number, altitude?: number) => { x: number; y: number };
   getCoords: (lat: number, lng: number, altitude?: number) => { x: number; y: number; z: number };
   camera: () => { position: { x: number; y: number; z: number } };
+  pointOfView: (coords: { lat: number; lng: number; altitude?: number }, ms?: number) => void;
 }
 
 export const mapRef: { current: MlMap | null } = { current: null };

@@ -112,6 +112,7 @@ export interface Flight {
   direction: 'outbound' | 'inbound';
   isLan: boolean;
   startedAt: number;
+  landedAt?: number; // Date.now() when the flight closed (for the board linger)
   hostnameResolved: boolean;
 }
 
