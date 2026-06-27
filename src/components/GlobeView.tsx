@@ -31,6 +31,13 @@ function rgba(hex: string, a: number): string {
   return `rgba(${parseInt(h.slice(0, 2), 16)},${parseInt(h.slice(2, 4), 16)},${parseInt(h.slice(4, 6), 16)},${a.toFixed(3)})`;
 }
 
+// "#rrggbb" → normalized "r,g,b" for a GLSL vec3 literal.
+function hexToVec3(hex: string): string {
+  const h = hex.replace('#', '');
+  const c = (i: number) => (parseInt(h.slice(i, i + 2), 16) / 255).toFixed(4);
+  return `${c(0)},${c(2)},${c(4)}`;
+}
+
 interface DestDot {
   country: string;
   lat: number;
@@ -92,21 +99,43 @@ export default function GlobeView() {
     };
   });
 
-  // Theme tint on the earth material (multiplies the texture; planes keep livery).
-  // globeMaterial() exists at runtime but isn't in the react-globe.gl types.
-  // Re-apply on globeImageUrl change too: swapping the texture reloads async and
-  // can clobber the tint, so we set it now and again after the load settles.
+  // Recolor the 3D globe surface per theme. Themes with globeLand/globeWater get
+  // a two-color luminance remap of the earth texture in the fragment shader (the
+  // 3D analogue of the 2D map recolor); the rest keep the realistic texture and a
+  // multiply tint. globeMaterial() exists at runtime but isn't in the types.
+  const applyGlobeTheme = useCallback(() => {
+    const mat = (
+      globe.current as unknown as { globeMaterial?: () => THREE.MeshPhongMaterial }
+    )?.globeMaterial?.();
+    if (!mat) return;
+    // Distinct cache key per theme so three.js recompiles (it reuses the cached
+    // program if the key is unchanged, ignoring a new onBeforeCompile otherwise).
+    mat.customProgramCacheKey = () => `netport-globe-${theme.id}`;
+    if (theme.globeLand && theme.globeWater) {
+      const land = hexToVec3(theme.globeLand);
+      const water = hexToVec3(theme.globeWater);
+      mat.color.set('#ffffff'); // let the texture's luminance drive the remap
+      mat.onBeforeCompile = (shader) => {
+        shader.fragmentShader = shader.fragmentShader.replace(
+          '#include <map_fragment>',
+          `#include <map_fragment>
+           float _lum = dot(diffuseColor.rgb, vec3(0.299, 0.587, 0.114));
+           diffuseColor.rgb = mix(vec3(${water}), vec3(${land}), smoothstep(0.07, 0.22, _lum));`,
+        );
+      };
+    } else {
+      mat.onBeforeCompile = () => {}; // realistic earth (Midnight / Satellite)
+      mat.color.set(theme.globeTint);
+    }
+    mat.needsUpdate = true; // force a shader recompile with the new colors
+  }, [theme]);
+
+  // Apply on theme change, and again after the async texture swap settles.
   useEffect(() => {
-    const setTint = () => {
-      const mat = (
-        globe.current as unknown as { globeMaterial?: () => THREE.MeshPhongMaterial }
-      )?.globeMaterial?.();
-      if (mat?.color) mat.color.set(theme.globeTint);
-    };
-    setTint();
-    const t = setTimeout(setTint, 250);
+    applyGlobeTheme();
+    const t = setTimeout(applyGlobeTheme, 250);
     return () => clearTimeout(t);
-  }, [theme.globeTint, theme.globeImageUrl]);
+  }, [applyGlobeTheme]);
 
   useEffect(() => {
     const c = globe.current?.controls() as { autoRotate: boolean } | undefined;
@@ -338,10 +367,7 @@ export default function GlobeView() {
           const dir = new THREE.DirectionalLight(0xffffff, 0.85);
           dir.position.set(1, 1, 1);
           scene.add(dir);
-          const mat = (
-            g as unknown as { globeMaterial?: () => THREE.MeshPhongMaterial }
-          ).globeMaterial?.();
-          if (mat?.color) mat.color.set(theme.globeTint);
+          applyGlobeTheme();
           const primary = homeRef.current.find((a) => a.id === 'primary') ?? homeRef.current[0];
           if (primary) g.pointOfView({ lat: primary.lat, lng: primary.lng, altitude: 2.3 }, 0);
           const c = g.controls() as {
