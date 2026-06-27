@@ -132,7 +132,7 @@ export default function GlobeView() {
   // destination dots on the surface still show through); border = the theme's 2D
   // line color (or accent) for a crisp themed outline.
   const landFill = theme.globeLand;
-  const borderColor = theme.mapRecolor?.line ?? theme.accent;
+  const borderColor = theme.globeBorder ?? theme.mapRecolor?.line ?? theme.accent;
   const polygonCapColor = useCallback(
     () => (landFill ? rgba(landFill, 0.82) : 'rgba(0,0,0,0)'),
     [landFill],

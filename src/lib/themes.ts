@@ -39,6 +39,7 @@ export interface Theme {
   // mirroring the 2D map recolor. Absent = realistic texture (Midnight/Satellite).
   globeLand?: string;
   globeWater?: string;
+  globeBorder?: string; // globe country borders (else falls back to mapRecolor.line ?? accent)
   bg: string; // app background
   mapStyle: string | StyleSpecification; // 2D base style
   mapRecolor?: MapRecolor; // optional dark-base recolor (absent = native colors)
@@ -75,6 +76,11 @@ export const THEMES: Theme[] = [
     atmosphere: '#3a82ff',
     globeTint: '#ffffff',
     globeImageUrl: EARTH_DARK,
+    // Vector globe matching the 2D dark-matter map: dark gray-blue land, near-black
+    // ocean, subtle gray borders (the realistic photo read as nearly pure black).
+    globeLand: '#31343d',
+    globeWater: '#0c0d12',
+    globeBorder: '#474c57',
     bg: '#000000',
     mapStyle: DARK,
   },
