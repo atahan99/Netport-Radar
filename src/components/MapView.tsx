@@ -108,7 +108,8 @@ export default function MapView() {
       style: STYLE,
       center: [15, 30],
       zoom: 2,
-      attributionControl: false,
+      // Compact "ⓘ" bottom-right — Carto/OSM tile usage requires attribution.
+      attributionControl: { compact: true },
       maxZoom: 12,
     });
     mapRef.current = map;
