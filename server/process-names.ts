@@ -7,13 +7,14 @@ import { execSync } from 'child_process';
 import { normalizeProcess } from '../src/lib/livery';
 import { PROCESS_POLL_MS } from './config';
 
-interface ProcEntry {
+export interface ProcEntry {
   command: string;
   pid: number;
 }
 
 let table = new Map<string, ProcEntry>();
 let timer: ReturnType<typeof setInterval> | undefined;
+let onPollCb: ((entries: [string, ProcEntry][]) => void) | undefined;
 
 function runLsof(): string {
   try {
@@ -57,16 +58,27 @@ function poll(): void {
       }
     }
   }
-  if (next.size > 0) table = next;
+  if (next.size > 0) {
+    table = next;
+    onPollCb?.([...next]); // privileged broker forwards this to the parent
+  }
 }
 
-export function startProcessPolling(): void {
+// `onPoll` lets the privileged broker stream each lsof result to the unprivileged
+// parent (which can't run a root lsof itself after dropping privileges).
+export function startProcessPolling(onPoll?: (entries: [string, ProcEntry][]) => void): void {
+  onPollCb = onPoll;
   poll();
   timer = setInterval(poll, PROCESS_POLL_MS);
 }
 
 export function stopProcessPolling(): void {
   if (timer) clearInterval(timer);
+}
+
+// Parent side: inject the table received from the broker so lookupProcess works.
+export function setProcessTable(entries: [string, ProcEntry][]): void {
+  table = new Map(entries);
 }
 
 export function lookupProcess(

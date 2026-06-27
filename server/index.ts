@@ -8,7 +8,7 @@
 // the only thing that leaves the machine. Set NETPORT_HOME_LAT / NETPORT_HOME_LNG
 // (+ NETPORT_HOME_LABEL) to skip it entirely.
 
-import { execSync, type ChildProcess } from 'child_process';
+import { execSync, fork, type ChildProcess } from 'child_process';
 import * as os from 'os';
 import http from 'http';
 import net from 'net';
@@ -27,7 +27,8 @@ import {
 import { FlowTracker } from './flow-tracker';
 import { WsHub } from './ws';
 import { logEvent, exportNdjson, resetLog } from './logger';
-import { startProcessPolling, stopProcessPolling } from './process-names';
+import { startProcessPolling, stopProcessPolling, setProcessTable } from './process-names';
+import type { BrokerIn, BrokerOut } from './priv-broker';
 import { WS_PORT, HTTP_PORT, BIND_HOST, IS_LOCAL_BIND, TOKEN } from './config';
 
 function getDefaultInterface(): string {
@@ -222,6 +223,42 @@ function lanIp(): string | null {
   return null;
 }
 
+// Privilege separation: capturing needs root, but the long-running network-facing
+// servers (WS control channel, HTTP, flow tracker) should not. When started via
+// sudo on a POSIX host we keep the root-only work (tshark/tcpdump spawn + lsof) in
+// a small broker child and drop the main process to the invoking user. If we
+// can't (not root, not via sudo, Windows, or opted out), everything runs inline
+// exactly as before — no behavior change.
+function resolveDropTarget(): { uid: number; gid: number } | null {
+  if (process.env.NETPORT_NO_PRIVDROP) return null;
+  if (process.platform === 'win32') return null;
+  if (typeof process.getuid !== 'function' || process.getuid() !== 0) return null;
+  const uid = Number(process.env.SUDO_UID);
+  const gid = Number(process.env.SUDO_GID);
+  // Need a real non-root target (sudo from a normal user sets SUDO_UID/GID).
+  if (!Number.isInteger(uid) || uid <= 0 || !Number.isInteger(gid) || gid < 0) return null;
+  return { uid, gid };
+}
+
+function dropPrivileges(target: { uid: number; gid: number }): void {
+  try {
+    process.setgid?.(target.gid);
+    try {
+      process.setgroups?.([target.gid]); // shed supplementary groups (e.g. wheel)
+    } catch {
+      /* non-fatal on some platforms */
+    }
+    process.setuid?.(target.uid); // must be last — can't change gid after
+    console.log(
+      `[security] dropped to uid=${target.uid} gid=${target.gid}; capture runs in the root broker.`,
+    );
+  } catch (e) {
+    // The broker is already forked; if the drop fails we keep running as before
+    // (servers root) rather than aborting — no worse than the pre-change state.
+    console.error('[security] privilege drop failed — continuing as root:', e);
+  }
+}
+
 async function main(): Promise<void> {
   if (!(await isPortFree(WS_PORT))) {
     console.error(
@@ -240,7 +277,6 @@ async function main(): Promise<void> {
 
   const backend: CaptureBackend = detectBackend();
   let iface = process.env.NETPORT_IFACE ?? getDefaultInterface();
-  let localIps = getLocalIps();
   const backendInfo: BackendInfo = {
     capture: backend,
     dpiMode: backend === 'tshark' ? 'full' : 'port-based',
@@ -318,52 +354,131 @@ async function main(): Promise<void> {
   // Re-cluster periodically so a newly-seen public source IP can add a VPN exit.
   const clusterTimer = setInterval(publishHomes, 10_000);
 
-  let captureProc: ChildProcess | null = null;
   let shuttingDown = false;
-  let permissionDenied = false;
-  let restartCount = 0;
-  let lastRestart = 0;
 
-  const onCaptureError = (msg: string) => {
-    console.error('[capture]', msg);
-    if (/permission|denied|bpf|root|operation not permitted/i.test(msg)) {
-      permissionDenied = true; // a restart won't fix this — let the banner stand
-      ws.error('capture_permission', 'No capture permission — run with sudo (see README).');
-    } else {
-      ws.error('capture_error', msg.slice(0, 200));
-    }
-  };
+  // Capture + lsof are the only root-only operations. When we can drop privileges
+  // (sudo on POSIX), they run in a root broker child and this process drops to the
+  // invoking user; otherwise they run inline, exactly as before.
+  interface CaptureControl {
+    switchTo(iface: string): void;
+    stop(): void;
+  }
 
-  // Supervisor: a capture process that dies (laptop sleep/wake, interface flap)
-  // is restarted once; if it dies again within 30s it's declared dead. An
-  // intentional kill (interface switch / shutdown) is distinguished by proc
-  // identity — the superseded proc's exit handler sees proc !== captureProc.
-  function spawnCapture(): void {
-    const proc = startCapture(backend, iface, localIps, (p) => tracker.ingest(p), onCaptureError);
-    captureProc = proc;
-    if (!proc) {
-      ws.error('no_backend', 'No capture backend available — install Wireshark (tshark).');
-      return;
-    }
-    proc.on('exit', () => {
-      if (proc !== captureProc || shuttingDown || permissionDenied) return;
-      const now = Date.now();
-      const recent = now - lastRestart < 30_000;
-      if (recent && restartCount >= 1) {
-        ws.error('capture_dead', 'Capture keeps dying — check permissions or the interface (see README).');
+  // Inline path (no privilege drop): spawn capture here and poll lsof here.
+  function startInlineCapture(): CaptureControl {
+    let captureProc: ChildProcess | null = null;
+    let permissionDenied = false;
+    let restartCount = 0;
+    let lastRestart = 0;
+
+    const onCaptureError = (msg: string) => {
+      console.error('[capture]', msg);
+      if (/permission|denied|bpf|root|operation not permitted/i.test(msg)) {
+        permissionDenied = true; // a restart won't fix this — let the banner stand
+        ws.error('capture_permission', 'No capture permission — run with sudo (see README).');
+      } else {
+        ws.error('capture_error', msg.slice(0, 200));
+      }
+    };
+
+    // Supervisor: a capture process that dies (sleep/wake, interface flap) is
+    // restarted once; a second death within 30s is declared dead. An intentional
+    // kill (switch/shutdown) is distinguished by proc identity.
+    function spawnCapture(): void {
+      const proc = startCapture(backend, iface, getLocalIps(), (p) => tracker.ingest(p), onCaptureError);
+      captureProc = proc;
+      if (!proc) {
+        ws.error('no_backend', 'No capture backend available — install Wireshark (tshark).');
         return;
       }
-      restartCount = recent ? restartCount + 1 : 1;
-      lastRestart = now;
-      ws.error('capture_error', 'Capture process exited — restarting…');
-      setTimeout(() => {
-        if (proc === captureProc && !shuttingDown && !permissionDenied) spawnCapture();
-      }, 2000);
-    });
+      proc.on('exit', () => {
+        if (proc !== captureProc || shuttingDown || permissionDenied) return;
+        const now = Date.now();
+        const recent = now - lastRestart < 30_000;
+        if (recent && restartCount >= 1) {
+          ws.error('capture_dead', 'Capture keeps dying — check permissions or the interface (see README).');
+          return;
+        }
+        restartCount = recent ? restartCount + 1 : 1;
+        lastRestart = now;
+        ws.error('capture_error', 'Capture process exited — restarting…');
+        setTimeout(() => {
+          if (proc === captureProc && !shuttingDown && !permissionDenied) spawnCapture();
+        }, 2000);
+      });
+    }
+    spawnCapture();
+    startProcessPolling();
+    return {
+      switchTo: () => {
+        permissionDenied = false;
+        restartCount = 0;
+        captureProc?.kill(); // its exit handler no-ops once spawnCapture reassigns
+        spawnCapture();
+      },
+      stop: () => {
+        captureProc?.kill();
+        stopProcessPolling();
+      },
+    };
   }
-  spawnCapture();
 
-  startProcessPolling();
+  // Brokered path: fork the root broker, wire its IPC into the tracker/WS, then
+  // drop this process to the invoking user. The broker owns tshark + lsof.
+  function startBrokeredCapture(target: { uid: number; gid: number }): CaptureControl {
+    const broker = fork(join(import.meta.dirname, 'priv-broker.ts'), [], {
+      stdio: ['inherit', 'inherit', 'inherit', 'ipc'],
+    });
+    broker.on('message', (m: BrokerOut) => {
+      switch (m.t) {
+        case 'pkts':
+          for (const p of m.pkts) tracker.ingest(p);
+          break;
+        case 'proc':
+          setProcessTable(m.entries);
+          break;
+        case 'permission':
+          ws.error('capture_permission', 'No capture permission — run with sudo (see README).');
+          break;
+        case 'err':
+          ws.error('capture_error', m.msg);
+          break;
+        case 'dead':
+          ws.error('capture_dead', 'Capture keeps dying — check permissions or the interface (see README).');
+          break;
+        case 'restarting':
+          ws.error('capture_error', 'Capture process exited — restarting…');
+          break;
+        case 'no_backend':
+          ws.error('no_backend', 'No capture backend available — install Wireshark (tshark).');
+          break;
+      }
+    });
+    broker.on('exit', () => {
+      if (!shuttingDown) ws.error('capture_dead', 'Capture broker exited unexpectedly.');
+    });
+    const sendBroker = (m: BrokerIn) => {
+      try {
+        broker.send(m);
+      } catch {
+        /* broker gone */
+      }
+    };
+    sendBroker({ t: 'init', backend, iface });
+    dropPrivileges(target); // everything below this line runs as the invoking user
+    return {
+      switchTo: (next) => sendBroker({ t: 'switch', iface: next }),
+      stop: () => {
+        sendBroker({ t: 'stop' });
+        broker.kill();
+      },
+    };
+  }
+
+  const dropTarget = resolveDropTarget();
+  const capture: CaptureControl = dropTarget
+    ? startBrokeredCapture(dropTarget)
+    : startInlineCapture();
 
   ws.onClient = (msg, reply) => {
     if (msg.type === 'export') {
@@ -375,18 +490,14 @@ async function main(): Promise<void> {
         return;
       }
       console.log(`[iface] switching to ${msg.iface}`);
-      captureProc?.kill(); // its exit handler no-ops once spawnCapture reassigns captureProc
       tracker.clear();
       resetLog();
       ws.reset();
       iface = msg.iface;
       backendInfo.iface = iface;
-      localIps = getLocalIps();
       sourceIpHits.clear();
-      permissionDenied = false;
-      restartCount = 0;
       refreshHome();
-      spawnCapture();
+      capture.switchTo(iface);
       ws.broadcastInit();
     }
   };
@@ -405,9 +516,8 @@ async function main(): Promise<void> {
   const shutdown = () => {
     shuttingDown = true;
     clearInterval(clusterTimer);
-    captureProc?.kill();
+    capture.stop();
     tracker.stop();
-    stopProcessPolling();
     ws.stop();
     // Flush the session log to disk (the master plan promised this on clean close).
     const ndjson = exportNdjson();

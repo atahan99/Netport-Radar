@@ -95,11 +95,15 @@ No packets for 120s → force-closed.
 - Outbound traffic: exactly **one** public-IP geolocation lookup per session
   (HTTPS-first chain; env-overridable) — nothing else leaves the machine.
 - Capture requires root (BPF). The UI process is an ordinary browser tab.
-- **Known ceiling:** the Node process keeps root for its whole lifetime (capture
-  child + WS/HTTP servers + `lsof` + NDJSON export all run privileged). A
-  hardened design would open the capture, then drop to the invoking user
-  (`setuid`/`setgid` via `SUDO_UID`/`SUDO_GID`) and keep a small root supervisor
-  only for `switch_iface`. Mitigated for now by loopback bind + origin/token gate.
+- **Privilege separation** (`priv-broker.ts`): started via `sudo`, `index.ts`
+  forks a root **broker** that owns the only root-needing work (spawning
+  `tshark`/`tcpdump`, polling `lsof`) and streams `RawPacket`s + the process map
+  to the parent over IPC. The parent then `setgid`/`setgroups`/`setuid`s to the
+  invoking user, so the WS control channel, HTTP server, flow tracker, and
+  parsers all run unprivileged; the broker listens on no socket. `switch_iface`
+  is a command to the broker; the parent can't re-elevate. Falls back to the
+  inline single-process path when not root / not via sudo / Windows / when
+  `NETPORT_NO_PRIVDROP=1`. NDJSON export is written by the (unprivileged) parent.
 
 ## Conventions
 
