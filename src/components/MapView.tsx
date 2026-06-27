@@ -148,6 +148,14 @@ function makeHomeEl(home: HomeAirport): HTMLDivElement {
 
 export default function MapView() {
   const containerRef = useRef<HTMLDivElement>(null);
+  const theme = useFiltersStore((s) => s.theme);
+  // Ref-backed theme state shared between the map-setup effect and the
+  // theme-change effect below: the pristine basemap paint snapshot + the last
+  // base style we applied (to decide recolor-in-place vs. full setStyle).
+  const themeCtl = useRef<{ snaps: Map<string, PaintSnap>; lastStyle: string | object }>({
+    snaps: new Map(),
+    lastStyle: (THEME_BY_ID[useFiltersStore.getState().theme] ?? THEME_BY_ID.midnight).mapStyle,
+  });
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -166,9 +174,6 @@ export default function MapView() {
     const markers = new Map<string, maplibregl.Marker>();
     const homeMarkers: maplibregl.Marker[] = [];
     let loaded = false;
-    let currentTheme = initialTheme;
-    let lastStyle: string | object = initialTheme.mapStyle;
-    let paintSnaps = new Map<string, PaintSnap>();
 
     function renderHome(homeAirports: HomeAirport[]) {
       for (const m of homeMarkers) m.remove();
@@ -316,27 +321,17 @@ export default function MapView() {
     map.on('mouseleave', 'dests', () => (map.getCanvas().style.cursor = ''));
 
     // style.load fires on the initial load AND after every setStyle (theme swap).
+    // Snapshot the pristine basemap paint BEFORE adding our overlay so recolor
+    // never touches the arc/dest layers (they keep their data-driven colors).
     map.on('style.load', () => {
       loaded = true;
+      themeCtl.current.snaps = snapshotPaint(map);
       addOverlay();
-      paintSnaps = snapshotPaint(map);
-      recolorMap(map, paintSnaps, currentTheme);
+      const t = THEME_BY_ID[useFiltersStore.getState().theme] ?? THEME_BY_ID.midnight;
+      themeCtl.current.lastStyle = t.mapStyle;
+      recolorMap(map, themeCtl.current.snaps, t);
       renderHome(useFlightsStore.getState().homeAirports);
       update();
-    });
-
-    // Theme: recolor in place when the base style is unchanged, else setStyle
-    // (style.load re-adds the overlay + re-snapshots + recolors).
-    const unsubTheme = useFiltersStore.subscribe((st, prev) => {
-      if (st.theme === prev.theme) return;
-      const t = THEME_BY_ID[st.theme] ?? THEME_BY_ID.midnight;
-      currentTheme = t;
-      if (t.mapStyle !== lastStyle) {
-        lastStyle = t.mapStyle;
-        map.setStyle(t.mapStyle as maplibregl.StyleSpecification);
-      } else {
-        recolorMap(map, paintSnaps, t);
-      }
     });
 
     map.on('click', () => useFlightsStore.getState().selectFlight(null));
@@ -363,13 +358,29 @@ export default function MapView() {
     return () => {
       unsubFlights();
       unsubFilters();
-      unsubTheme();
       cancelAnimationFrame(frameRaf);
       hideTip();
       mapRef.current = null;
       map.remove();
     };
   }, []);
+
+  // Apply the theme on change: recolor in place when the base style is unchanged
+  // (instant, no tile reload), else setStyle (its style.load re-adds the overlay,
+  // re-snapshots, and recolors). Driven by a React effect off the store value so
+  // it reliably fires — the previous manual store.subscribe closure did not.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    const t = THEME_BY_ID[theme] ?? THEME_BY_ID.midnight;
+    if (t.mapStyle !== themeCtl.current.lastStyle) {
+      themeCtl.current.lastStyle = t.mapStyle;
+      map.setStyle(t.mapStyle as maplibregl.StyleSpecification);
+    } else if (map.isStyleLoaded()) {
+      recolorMap(map, themeCtl.current.snaps, t);
+      map.triggerRepaint();
+    }
+  }, [theme]);
 
   // Outer div owns the absolute-inset sizing; the inner div is MapLibre's
   // container (MapLibre forces position:relative on it, which would cancel
