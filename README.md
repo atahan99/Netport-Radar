@@ -175,9 +175,11 @@ Licensed MIT — see [LICENSE](LICENSE).
 
 ## Status
 
-All five phases complete: **1** demo UI · **2** 3D globe · **3** live capture ·
-**4** process attribution (real app names + brand livery, NDJSON export, live
-interface switching) · **5** polish + ship (lifecycle animations — taxi spool,
-hold-circle, landing flare; LAN orbit; blocking startup overlays + toasts;
-per-platform docs; globe code-split). Electron packaging was dropped — the app
+**Shipped.** Built in ten phases: demo UI → 3D globe → live capture → process
+attribution → polish → **security hardening** (loopback bind, WS origin/token
+gate) → **data honesty** (real ↓/↑, tcpdump closes, CGNAT, self-noise drops) →
+**perf architecture** (per-frame animation channel, HUD at 10Hz, eslint 0) →
+**test suite** (vitest, ~80 tests, 77% logic coverage) → **UX & a11y** (legend,
+filter chips, hover tooltips, keyboard nav, prefers-reduced-motion). Quality
+gate: `npm run check` (tsc ×2 + eslint + vitest). Electron was dropped — the app
 ships as `sudo npm start`.
