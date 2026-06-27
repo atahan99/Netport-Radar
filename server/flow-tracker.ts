@@ -246,7 +246,7 @@ export class FlowTracker {
       countryFlag: flag,
       city,
       org: geo?.org ?? 'Unknown',
-      asn: '',
+      asn: geo?.asn ?? '',
       hostname: remoteIp,
       sni: undefined,
       aircraftType: classify(p.detectedProtocol, 0, 0),
