@@ -98,15 +98,40 @@ export default function GlobeView() {
 
   // Themed globes are a flat ocean-colored sphere with country land drawn as
   // polygons (see <Globe> below) — the 3D analogue of the 2D vector map. Midnight
-  // and Satellite have no globeWater, so they keep the realistic earth texture and
-  // just get a multiply tint. globeMaterial() exists at runtime but isn't typed.
+  // and Satellite have no globeWater, so they keep the realistic earth photo + a
+  // multiply tint. We manage the earth texture imperatively (load + cache it,
+  // sRGB) rather than via the globeImageUrl prop, because toggling that prop
+  // undefined↔url did not reliably restore the photo when switching back.
+  // globeMaterial() exists at runtime but isn't in the react-globe.gl types.
+  const texLoaderRef = useRef<THREE.TextureLoader | null>(null);
+  const texCacheRef = useRef<Map<string, THREE.Texture>>(new Map());
   const applyGlobeTheme = useCallback(() => {
     const mat = (
       globe.current as unknown as { globeMaterial?: () => THREE.MeshPhongMaterial }
     )?.globeMaterial?.();
     if (!mat?.color) return;
-    mat.color.set(theme.globeWater ?? theme.globeTint);
-    mat.needsUpdate = true;
+    if (theme.globeLand && theme.globeWater) {
+      mat.map = null; // hide the photo — flat ocean sphere under the land polygons
+      mat.color.set(theme.globeWater);
+      mat.needsUpdate = true;
+      return;
+    }
+    // Realistic earth: tint white + (re)apply the cached/loaded texture.
+    mat.color.set(theme.globeTint);
+    const url = theme.globeImageUrl;
+    const cached = texCacheRef.current.get(url);
+    if (cached) {
+      mat.map = cached;
+      mat.needsUpdate = true;
+    } else {
+      const loader = (texLoaderRef.current ??= new THREE.TextureLoader());
+      loader.load(url, (tex) => {
+        tex.colorSpace = THREE.SRGBColorSpace;
+        texCacheRef.current.set(url, tex);
+        mat.map = tex;
+        mat.needsUpdate = true;
+      });
+    }
   }, [theme]);
 
   // Apply on theme change, and again after the async texture swap settles.
@@ -363,7 +388,6 @@ export default function GlobeView() {
         ref={globe}
         width={size.w}
         height={size.h}
-        globeImageUrl={theme.globeLand ? undefined : theme.globeImageUrl}
         backgroundImageUrl="/textures/night-sky.png"
         backgroundColor="#000000"
         atmosphereColor={theme.atmosphere}
