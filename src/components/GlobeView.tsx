@@ -206,7 +206,7 @@ export default function GlobeView() {
       } catch {
         /* keep */
       }
-      if (visible) leader = { x1: sc.x, y1: sc.y, x2: size.w - 336, y2: size.h - 150 };
+      if (visible) leader = { x1: sc.x, y1: sc.y, x2: size.w / 2, y2: size.h - 280 };
     }
   }
 

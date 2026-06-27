@@ -83,13 +83,19 @@ export default function FlightCard() {
   const home = homeAirports.find((a) => a.id === f.homeAirportId);
   const pct = Math.round(f.arcProgress * 100);
 
+  // Docked: centered on the bottom row, between the departures/arrivals boards.
+  const dockedStyle: React.CSSProperties = {
+    left: '50%',
+    bottom: 16,
+    transform: 'translateX(-50%)',
+  };
   let style: React.CSSProperties;
   if (mode === 'docked') {
-    style = { right: 16, bottom: 16 };
+    style = dockedStyle;
   } else {
     const sp = anchoredPos(f, home, viewMode === '2d');
     if (!sp) {
-      style = { right: 16, bottom: 16 };
+      style = dockedStyle;
     } else {
       style = {
         left: sp.x,
