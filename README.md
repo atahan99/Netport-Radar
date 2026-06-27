@@ -86,13 +86,31 @@ VITE_DEMO=1 npm run dev
 ## Home location
 
 Behind NAT your source IP is private and can't be geolocated, so the home
-airport is placed from your **public IP** — one lookup via `ip-api.com`
-(city-accurate; the only outbound request the app makes). To skip it and set
-your location manually:
+airport is placed from your **public IP** — one lookup per session
+(HTTPS-first: `ipapi.co`, falling back to `ip-api.com`, then `ipify` + the
+local GeoIP database). That's the only outbound request the app makes. To skip
+it and set your location manually:
 
 ```bash
 sudo NETPORT_HOME_LAT=41.01 NETPORT_HOME_LNG=28.97 NETPORT_HOME_LABEL="Istanbul, TR" npm start
 ```
+
+## Security model
+
+This tool watches your traffic, so its own surface is kept deliberately small
+(details in [ARCHITECTURE.md](ARCHITECTURE.md)):
+
+- The capture server (ws `:8090`) and UI server (`:8080`) bind
+  **127.0.0.1 only** — nothing on your network can reach them.
+- WebSocket connections from web pages are allowed only from **localhost
+  origins**, so a random website open in your browser can't read your traffic
+  feed (browsers don't apply CORS to WebSockets — this gate matters).
+- Want the dashboard on another device? `NETPORT_BIND=0.0.0.0 sudo npm start`
+  prints a tokenized URL (`http://<your-ip>:8080/?token=…`); every WS
+  connection must present that per-boot token.
+- Read-only by construction: the capture path never blocks, injects, or
+  modifies traffic. Everything stays on your machine except the single
+  geolocation lookup above.
 
 ## Controls
 
@@ -126,6 +144,20 @@ running on live traffic:
 
 Vite · React · TypeScript (strict) · Tailwind v4 · shadcn/ui · Zustand ·
 MapLibre GL (2D) · react-globe.gl + three (3D, lazy-loaded) · ws · geoip-lite.
+
+## Credits & data licenses
+
+- Basemap tiles & style © [CARTO](https://carto.com/attributions), data
+  © [OpenStreetMap](https://www.openstreetmap.org/copyright) contributors
+- This product includes GeoLite2 data created by MaxMind
+  (via [geoip-lite](https://github.com/geoip-lite/node-geoip))
+- Globe textures from [three-globe](https://github.com/vasturiano/three-globe)
+  (MIT; NASA visible-earth imagery), vendored in `public/textures/`
+- UI pieces: [shadcn/ui](https://ui.shadcn.com) · [lucide](https://lucide.dev)
+  icons · [MapLibre GL JS](https://maplibre.org) ·
+  [react-globe.gl](https://github.com/vasturiano/react-globe.gl)
+
+Licensed MIT — see [LICENSE](LICENSE).
 
 ## Status
 
