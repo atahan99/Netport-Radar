@@ -1,5 +1,6 @@
 import { useFiltersStore } from '@/store/filters';
 import { useDemoFlights } from '@/lib/demo';
+import { useLiveFlights } from '@/lib/live';
 import MapView from '@/components/MapView';
 import GlobeView from '@/components/GlobeView';
 import FlightCard from '@/components/FlightCard';
@@ -9,10 +10,14 @@ import ArrivalsBoard from '@/components/ArrivalsBoard';
 import RadarHUD from '@/components/RadarHUD';
 import MetricsStrip from '@/components/MetricsStrip';
 import ReconnectingOverlay from '@/components/ReconnectingOverlay';
+import CaptureBanner from '@/components/CaptureBanner';
 
 export default function App() {
   const viewMode = useFiltersStore((s) => s.viewMode);
-  useDemoFlights();
+  // Live capture by default; demo generator behind VITE_DEMO=1 for offline UI work.
+  const demo = import.meta.env.VITE_DEMO === '1';
+  useDemoFlights(demo);
+  useLiveFlights(!demo);
 
   return (
     <div className="relative h-screen w-screen overflow-hidden bg-black">
@@ -44,7 +49,10 @@ export default function App() {
       {/* Filter drawer (shadcn Sheet) */}
       <FilterPanel />
 
-      {/* Reconnecting overlay — R key toggles it in demo */}
+      {/* Capture-layer banner (e.g. needs sudo) — WS is up but no packets */}
+      <CaptureBanner />
+
+      {/* Reconnecting overlay — shown when the WS to the server drops */}
       <ReconnectingOverlay />
     </div>
   );
