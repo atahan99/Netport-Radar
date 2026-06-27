@@ -48,6 +48,14 @@ function getLocalIps(): Set<string> {
   return set;
 }
 
+interface IpapiCoResp {
+  latitude: number;
+  longitude: number;
+  city: string;
+  country_code: string;
+  ip: string;
+}
+
 interface IpApiResp {
   status: string;
   country: string;
@@ -58,6 +66,9 @@ interface IpApiResp {
   query: string;
 }
 
+// Home airport from the public IP — still exactly ONE outbound lookup per
+// session, just HTTPS-first now: ipapi.co (HTTPS) → ip-api.com (HTTP-only free
+// tier) → ipify + local geoip-lite (country-accurate). Env override skips all.
 async function resolvePrimaryHome(): Promise<HomeAirport> {
   const { NETPORT_HOME_LAT, NETPORT_HOME_LNG, NETPORT_HOME_LABEL } = process.env;
   if (NETPORT_HOME_LAT && NETPORT_HOME_LNG) {
@@ -70,7 +81,22 @@ async function resolvePrimaryHome(): Promise<HomeAirport> {
       isVpn: false,
     };
   }
-  // ip-api.com geolocates your public IP city-accurately in one call.
+  try {
+    const r = await fetch('https://ipapi.co/json/', { signal: AbortSignal.timeout(4000) });
+    const j = (await r.json()) as IpapiCoResp;
+    if (typeof j.latitude === 'number' && typeof j.longitude === 'number') {
+      return {
+        id: 'primary',
+        label: j.city ? `${j.city}, ${j.country_code}` : (j.country_code ?? 'Home'),
+        lat: j.latitude,
+        lng: j.longitude,
+        ip: j.ip ?? '',
+        isVpn: false,
+      };
+    }
+  } catch {
+    /* fall through */
+  }
   try {
     const r = await fetch(
       'http://ip-api.com/json/?fields=status,country,countryCode,city,lat,lon,query',
@@ -90,7 +116,6 @@ async function resolvePrimaryHome(): Promise<HomeAirport> {
   } catch {
     /* fall through to the local DB */
   }
-  // Fallback: public IP + local geoip-lite (country-accurate).
   try {
     const ip = (
       await (await fetch('https://api.ipify.org', { signal: AbortSignal.timeout(4000) })).text()
@@ -255,6 +280,11 @@ async function main(): Promise<void> {
     if (msg.type === 'export') {
       reply({ type: 'log', ndjson: exportNdjson() });
     } else if (msg.type === 'switch_iface' && msg.iface !== iface) {
+      // Interface names come over the wire — only accept ones that exist.
+      if (!getInterfaces().includes(msg.iface)) {
+        reply({ type: 'error', code: 'bad_iface', message: `Unknown interface "${msg.iface.slice(0, 32)}"` });
+        return;
+      }
       console.log(`[iface] switching to ${msg.iface}`);
       captureProc?.kill();
       tracker.clear();
