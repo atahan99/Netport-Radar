@@ -149,3 +149,16 @@ body {
 .hud-scroll::-webkit-scrollbar-track {
   background: transparent;
 }
+
+/* Reduced motion: kill CSS animations/transitions (home ring pulse, board row
+   entrance, landing flare, sheet/fade). The views also skip flares + auto-rotate
+   and lifecyclePose returns static poses; arc travel itself stays. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}

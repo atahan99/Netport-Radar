@@ -5,6 +5,7 @@
 // home instead of departing.
 
 import type { Flight } from '@/types';
+import { reducedMotion } from '@/lib/motion';
 
 export interface Pose {
   dLat: number; // degrees offset added to the base position
@@ -36,6 +37,11 @@ function orbit(
 export function lifecyclePose(f: Flight, t: number): Pose {
   if (f.phase === 'landed') {
     return { dLat: 0, dLng: 0, scale: 0.85, opacity: 0.3 };
+  }
+  // Reduced motion: no orbit / no spool pulse — a static plane (LAN keeps its
+  // dimmer opacity so it stays visually distinct). Arc travel itself remains.
+  if (reducedMotion()) {
+    return { dLat: 0, dLng: 0, scale: 1, opacity: f.isLan ? 0.9 : 1 };
   }
   const off = phaseOffset(f.id);
   if (f.isLan) {
