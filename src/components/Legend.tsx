@@ -3,6 +3,7 @@ import { X } from 'lucide-react';
 import { useFiltersStore } from '@/store/filters';
 import { AIRCRAFT_ICONS } from '@/lib/icons';
 import { PHASE_META, PHASE_ORDER } from '@/lib/phase';
+import { LIVERY_COLORS } from '@/lib/livery';
 import type { AircraftType } from '@/types';
 
 const AIRCRAFT: Array<[AircraftType, string]> = [
@@ -91,7 +92,25 @@ export default function Legend() {
           <li>— solid arc · - - dashed arc = VPN</li>
           <li>○ white ring = home · ○ purple = VPN exit</li>
           <li>LAN traffic orbits home · stealth is semi-transparent</li>
+          <li>?? = unknown shelf · ~CC = country-centroid guess</li>
         </ul>
+
+        <div className="mb-1 mt-3 font-mono text-[10px] uppercase tracking-wide text-zinc-500">Brand colors</div>
+        <div className="flex flex-wrap gap-1">
+          {Object.entries(LIVERY_COLORS)
+            .slice(0, 24)
+            .map(([name, hex]) => (
+              <span
+                key={name}
+                className="inline-flex items-center gap-1 rounded bg-zinc-900 px-1 py-0.5 font-mono text-[9px] text-zinc-400"
+                title={hex}
+              >
+                <span className="h-2 w-2 rounded-full" style={{ background: hex }} />
+                {name}
+              </span>
+            ))}
+          <span className="self-center text-[9px] text-zinc-600">+{Object.keys(LIVERY_COLORS).length - 24} more</span>
+        </div>
 
         {demo && (
           <div className="mt-3 border-t border-zinc-800 pt-2 font-mono text-[10px] text-zinc-600">

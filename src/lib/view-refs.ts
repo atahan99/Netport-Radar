@@ -19,3 +19,5 @@ export interface GlobeApi {
 
 export const mapRef: { current: MlMap | null } = { current: null };
 export const globeRef: { current: GlobeApi | null } = { current: null };
+// Docked flight card — LeaderLine reads getBoundingClientRect for its endpoint.
+export const flightCardRef: { current: HTMLDivElement | null } = { current: null };

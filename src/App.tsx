@@ -21,10 +21,18 @@ import ErrorBoundary from '@/components/ErrorBoundary';
 import FilterChips from '@/components/FilterChips';
 import Legend from '@/components/Legend';
 import SceneAnnouncer from '@/components/SceneAnnouncer';
+import FpsOverlay from '@/components/FpsOverlay';
+import SessionStats from '@/components/SessionStats';
+import { useDiagnosticsStore } from '@/store/diagnostics';
 
 // Code-split the 3D globe: it pulls in the ~3 MB three.js chunk, which the
 // default 2D map + first paint shouldn't have to carry. Loaded on first switch.
-const GlobeView = lazy(() => import('@/components/GlobeView'));
+const GlobeView = lazy(() =>
+  import('@/components/GlobeView').catch((err) => {
+    useDiagnosticsStore.getState().recordChunkError('GlobeView', err);
+    throw err;
+  }),
+);
 
 // Step selection through the on-screen flights — a keyboard alternative to
 // clicking individual planes on the canvas. The new selection is announced by
@@ -121,21 +129,23 @@ export default function App() {
       {/* HUD overlays — radar hides on very narrow viewports */}
       <div className="absolute left-4 top-4 z-10 hidden min-[700px]:block">
         <RadarHUD />
+        <SessionStats />
       </div>
       <div className="absolute right-4 top-4 z-20 flex flex-col items-end gap-2">
         <MetricsStrip />
         <FilterChips />
       </div>
       <Legend />
-      <div className="absolute bottom-4 left-4 z-10">
-        <DeparturesBoard />
+      {/* Bottom row: departures · docked flight card · arrivals */}
+      <div className="pointer-events-none absolute inset-x-0 bottom-4 z-10 flex items-end justify-between gap-2 px-4">
+        <div className="pointer-events-auto shrink-0">
+          <DeparturesBoard />
+        </div>
+        <FlightCard />
+        <div className="pointer-events-auto hidden shrink-0 min-[900px]:block">
+          <ArrivalsBoard />
+        </div>
       </div>
-      <div className="absolute bottom-4 right-4 z-10 hidden min-[900px]:block">
-        <ArrivalsBoard />
-      </div>
-
-      {/* Flight card — anchored or docked per toggle; rendered at root */}
-      <FlightCard />
 
       {/* Filter drawer (shadcn Sheet) */}
       <FilterPanel />
@@ -148,6 +158,8 @@ export default function App() {
 
       {/* Blocking recovery screen for fatal startup problems */}
       <StartupOverlay />
+
+      <FpsOverlay />
     </div>
   );
 }

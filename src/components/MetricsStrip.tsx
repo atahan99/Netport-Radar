@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Menu, Map as MapIcon, Globe, Pin, PinOff, Download, CircleHelp } from 'lucide-react';
+import { Menu, Map as MapIcon, Globe, Download, CircleHelp, Stethoscope } from 'lucide-react';
 import { useFlightsStore } from '@/store/flights';
 import { useFiltersStore } from '@/store/filters';
 import { filterChips } from '@/lib/filter-chips';
@@ -9,6 +9,7 @@ import { useBackendStore } from '@/store/backend';
 import { Button } from '@/components/ui/button';
 import { liveControl } from '@/lib/live';
 import { fmtRate } from '@/lib/format';
+import { exportDiagnostics, useDiagnosticsStore } from '@/store/diagnostics';
 import {
   Select,
   SelectContent,
@@ -106,13 +107,15 @@ export default function MetricsStrip() {
   const theme = useFiltersStore((s) => s.theme);
   const setTheme = useFiltersStore((s) => s.setTheme);
   const hasActiveFilters = useFiltersStore((s) => filterChips(s).length > 0);
-  const toggleCardAnchor = useFiltersStore((s) => s.toggleCardAnchor);
-  const cardMode = useFiltersStore((s) => (s.viewMode === '2d' ? s.cardAnchor2d : s.cardAnchor3d));
   const backend = useBackendStore((s) => s.backend);
   const demo = import.meta.env.VITE_DEMO === '1';
   const dpi = demo ? 'demo' : backend ? (backend.dpiMode === 'full' ? 'tshark' : 'port-based') : '…';
   const iface = demo ? 'demo' : backend?.iface ?? '…';
   const online = useBackendStore((s) => s.online);
+  const diagEntries = useDiagnosticsStore((s) => s.entries.length);
+  const wsState = useDiagnosticsStore((s) => s.wsState);
+  const lastWsClose = useDiagnosticsStore((s) => s.lastWsClose);
+  const chunkErrors = useDiagnosticsStore((s) => s.chunkErrors.length);
   const ifaceOptions = demo ? ['demo'] : backend?.interfaces?.length ? backend.interfaces : [iface];
   const [pendingIface, setPendingIface] = useState<string | null>(null);
 
@@ -161,26 +164,36 @@ export default function MetricsStrip() {
     return () => clearInterval(id);
   }, []);
 
+  const diagHint =
+    chunkErrors > 0
+      ? `${chunkErrors} chunk load error(s)`
+      : lastWsClose && lastWsClose.code !== 1000
+        ? `WS closed (${lastWsClose.code})`
+        : wsState === 'disconnected'
+          ? 'WS disconnected'
+          : null;
+
   return (
     <>
-    <div className="flex flex-wrap items-center justify-end gap-x-3 gap-y-1 rounded-xl border border-zinc-800 bg-black/85 px-3 py-2 font-mono text-[11px] text-zinc-300 backdrop-blur-sm">
-      <div className="flex items-center gap-1.5">
+    <div className="flex flex-col items-end gap-1">
+    <div className="flex h-10 flex-nowrap items-center justify-end gap-x-3 overflow-x-auto rounded-xl border border-zinc-800 bg-black/85 px-3 font-mono text-[11px] text-zinc-300 backdrop-blur-sm [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+      <div className="flex shrink-0 items-center gap-1.5">
         <span className="text-emerald-400">↓</span>
-        <canvas ref={inCanvas} width={40} height={16} className="opacity-90" />
-        <span className="w-[58px] text-zinc-400">{fmtRate(rates.down)}</span>
+        <canvas ref={inCanvas} width={40} height={16} className="block h-4 w-10 shrink-0 opacity-90" />
+        <span className="w-[58px] shrink-0 text-zinc-400">{fmtRate(rates.down)}</span>
       </div>
-      <div className="flex items-center gap-1.5">
+      <div className="flex shrink-0 items-center gap-1.5">
         <span className="text-blue-400">↑</span>
-        <canvas ref={outCanvas} width={40} height={16} className="opacity-90" />
-        <span className="w-[58px] text-zinc-400">{fmtRate(rates.up)}</span>
+        <canvas ref={outCanvas} width={40} height={16} className="block h-4 w-10 shrink-0 opacity-90" />
+        <span className="w-[58px] shrink-0 text-zinc-400">{fmtRate(rates.up)}</span>
       </div>
 
-      <div className="text-zinc-200">
+      <div className="shrink-0 whitespace-nowrap text-zinc-200">
         ✈ {active}
         {offScreenCount > 0 && <span className="text-zinc-500"> (+{offScreenCount} off-screen)</span>}
       </div>
 
-      <span className="rounded bg-zinc-800 px-1.5 py-0.5 text-[10px] text-zinc-400">DPI: {dpi}</span>
+      <span className="shrink-0 rounded bg-zinc-800 px-1.5 py-0.5 text-[10px] text-zinc-400">DPI: {dpi}</span>
 
       <Select
         value={iface}
@@ -188,7 +201,7 @@ export default function MetricsStrip() {
           if (v !== iface && !demo) setPendingIface(v);
         }}
       >
-        <SelectTrigger className="w-[74px]">
+        <SelectTrigger className="h-7 w-[74px] shrink-0">
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
@@ -201,7 +214,7 @@ export default function MetricsStrip() {
       </Select>
 
       <Select value={theme} onValueChange={(v) => setTheme(v as ThemeName)}>
-        <SelectTrigger className="w-[96px]" aria-label="Color theme">
+        <SelectTrigger className="h-7 w-[96px] shrink-0" aria-label="Color theme">
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
@@ -213,7 +226,7 @@ export default function MetricsStrip() {
         </SelectContent>
       </Select>
 
-      <div className="flex items-center gap-1.5">
+      <div className="flex shrink-0 items-center gap-1.5">
         <div className="relative">
           <StripButton onClick={toggleFilterDrawer} label="Filters">
             <Menu />
@@ -228,16 +241,22 @@ export default function MetricsStrip() {
         <StripButton onClick={() => setViewMode(viewMode === '2d' ? '3d' : '2d')} label="2D / 3D">
           {viewMode === '2d' ? <MapIcon /> : <Globe />}
         </StripButton>
-        <StripButton
-          onClick={toggleCardAnchor}
-          label={`Flight card: ${cardMode}`}
-        >
-          {cardMode === 'anchored' ? <Pin /> : <PinOff />}
-        </StripButton>
         <StripButton onClick={doExport} label="Export log">
           <Download />
         </StripButton>
+        <StripButton onClick={exportDiagnostics} label="Export diagnostics">
+          <Stethoscope />
+        </StripButton>
       </div>
+    </div>
+    {diagHint && (
+      <div
+        className="rounded-md border border-amber-900/60 bg-amber-950/40 px-2 py-1 text-[10px] text-amber-300"
+        title={diagEntries ? `${diagEntries} diagnostic event(s) recorded` : undefined}
+      >
+        {diagHint}
+      </div>
+    )}
     </div>
       {pendingIface && (
         <div
