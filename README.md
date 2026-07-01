@@ -2,12 +2,15 @@
 
 Visualization-only local network monitor. Your machine is an airport; every
 connection is a flight flying an animated great-circle arc on a dark world map
-(or 3D globe) toward the remote IP's country.
+(or 3D globe) toward the remote IP's country — FlightRadar24 style: per-type
+aircraft silhouettes, callsign chips, gradient trails, and a planned-route line
+for the selected flight.
 
 **Read-only by design** — no blocking, no firewall, no traffic modification.
 Capture and deep-packet inspection run entirely on your machine. Seven color
-themes recolor the whole scene (2D map *and* 3D globe), and the UI is keyboard-
-and screen-reader-navigable.
+themes recolor the whole scene (the 3D globe uses the exact 2D basemap palette,
+remapped onto a real earth texture in a shader), and the UI is keyboard- and
+screen-reader-navigable.
 
 ## Screenshots
 
@@ -152,9 +155,10 @@ present that per-boot token. See [Security model](#security-model).
 
 ### Controls
 
-- **Click** a plane or a departures/arrivals row → flight card
+- **Click** a plane (2D map *or* 3D globe) or a departures/arrivals row → flight card; clicking empty map/sky clears it
 - **`[` / `]`** step backward / forward through the on-screen flights · **Esc** clears the selection
-- **[≡]** filters · **[⊞]** 2D / 3D · **theme** dropdown · **pin** = flight-card anchor ↔ dock · **[?]** legend
+- **[≡]** filters (protocols, traffic, direction, search, **trail colors**) · **[⊞]** 2D / 3D · **theme** dropdown · **pin** = flight-card anchor ↔ dock · **[?]** legend
+- **Trail colors** (in Filters): *App colors* keeps the livery on the trail; *Altitude* is the FR24 rainbow — hue encodes the altitude profile along the arc
 - (demo only) **R** reconnect overlay · **B** burst ~200 flights
 
 ### Themes
@@ -163,14 +167,17 @@ Pick from the theme dropdown in the top-right strip (persists across reloads):
 
 | Theme | 2D map | 3D globe |
 | --- | --- | --- |
-| **Midnight** | native Carto dark-matter | matching dark vector globe |
-| **Matrix / Cyberpunk / Amber / Blueprint** | dark-matter genuinely recolored (background/water/land/lines/labels via paint overrides) | flat themed ocean + country land polygons + border lines |
-| **Arctic** | light Positron basemap | light vector globe |
+| **Midnight** | native Carto dark-matter | the exact dark-matter palette on a real earth |
+| **Matrix / Cyberpunk / Amber / Blueprint** | dark-matter genuinely recolored (background/water/land/lines/labels via paint overrides) | the same recolor palette (land/water/borders) on a real earth |
+| **Arctic** | light Positron basemap | the exact Positron palette on a real earth |
 | **Satellite** | real Esri World Imagery | realistic NASA blue-marble earth |
 
-The 2D map is restyled at the MapLibre paint level (not a CSS tint); the 3D globe
-is the vector analogue (country polygons) for themed maps and a real photo for
-Satellite. Plane liveries keep their per-app brand colors in every theme.
+The 2D map is restyled at the MapLibre paint level (not a CSS tint). The 3D
+globe uses the **same palette as the 2D map**: a fragment shader remaps a real
+earth texture's luminance to the theme's land/water colors (crisp coastlines,
+no flat polygons), with the theme's line color as country borders. Satellite
+keeps the photo earth. Plane liveries keep their per-app brand colors in every
+theme.
 
 ### Accessibility
 
@@ -223,19 +230,22 @@ The UI surfaces capture problems directly:
 
 ## Known limitations
 
-**Process attribution.** Process names come from `lsof -i -nP` polled every **2
-seconds**, keyed on `proto:localPort` only:
+**Process attribution.** Process names come from `lsof -i -nP` polls, keyed on
+`proto:localPort` only. The cadence is adaptive: **500ms** (plus an immediate
+one-shot poll) while any young flow is unattributed, relaxing to **2s** when
+idle. Even so:
 
-- Short-lived connections that close before the next poll stay `process: '—'`.
+- Very short-lived connections that close before a poll stay `process: '—'`.
 - UDP ephemeral port reuse can mis-attribute a flow to the wrong app.
 - Without sudo, `lsof` only sees the current user's sockets.
 
 Late resolution triggers an `updated` patch and recolors 2D markers + 3D meshes.
 
-**IPv6 flow merge.** Flows are keyed by literal 5-tuple
-(`localIp:localPort>remoteIp:remotePort:proto`). The same logical connection over
-IPv4 and IPv6 appears as **two separate flights** today — merge by hostname or
-`/64` is planned, not yet shipped.
+**IPv4/IPv6 flow merge.** Flows to the same **resolved hostname** (same local
+IP, remote port, and protocol) merge into one flight across address families,
+and hostless IPv6 flows merge within their `/64`. The residual gap: a v4 + v6
+pair to the same server merges only once a hostname (SNI or reverse DNS)
+resolves — before that they render as two flights.
 
 **App liveries.** Per-app brand colors live in `src/lib/livery.ts` (`BRAND_COLORS`
 + regex `ALIASES`). Known apps get official hex; everything else hashes to a
@@ -256,7 +266,7 @@ npx vitest run --coverage
 - **Load / replay** — `npm run replay -- session.ndjson --speed 10` feeds NDJSON
   into the WS client; combine with the dev FPS overlay (`F` or `VITE_FPS=1`).
 
-`npm run check` is the quality gate (tsc ×2 + eslint + vitest, 148 tests),
+`npm run check` is the quality gate (tsc ×2 + eslint + vitest, 151 tests),
 enforced by GitHub Actions ([.github/workflows/ci.yml](.github/workflows/ci.yml)).
 
 ## Credits & data licenses

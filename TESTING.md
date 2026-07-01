@@ -27,8 +27,11 @@ After brokered start, logs must show `[security] dropped to uid=…` and `[secur
 
 ## Process attribution
 
-- `lookupProcess` keys on `TCP|UDP:localPort` from a 2s `lsof` poll.
-- `PROCESS_RETAIN_MS` (3s) keeps mappings after socket close so sub-2s flows (e.g. burst `curl`) still resolve when possible.
+- `lookupProcess` keys on `TCP|UDP:localPort` from an adaptive `lsof` poll:
+  2s idle, boosted to 500ms (plus an immediate debounced poll) while a young
+  flow is unattributed (`noteLookupMiss`, forwarded as a `boost` IPC message in
+  brokered runs).
+- `PROCESS_RETAIN_MS` (3s) keeps mappings after socket close so sub-poll flows (e.g. burst `curl`) still resolve when possible.
 - UDP ephemeral reuse and non-sudo `lsof` (only your user's sockets) remain known limits.
 
 ## Self-noise
