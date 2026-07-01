@@ -13,7 +13,7 @@
 import * as os from 'os';
 import type { ChildProcess } from 'child_process';
 import { startCapture, type CaptureBackend, type RawPacket } from './capture';
-import { startProcessPolling, type ProcEntry } from './process-names';
+import { startProcessPolling, noteLookupMiss, type ProcEntry } from './process-names';
 
 export type BrokerOut =
   | { t: 'pkts'; pkts: RawPacket[] }
@@ -27,6 +27,7 @@ export type BrokerOut =
 export type BrokerIn =
   | { t: 'init'; backend: CaptureBackend; iface: string }
   | { t: 'switch'; iface: string }
+  | { t: 'boost' } // parent saw an unattributed flow — poll lsof faster
   | { t: 'stop' };
 
 const send = (m: BrokerOut) => process.send?.(m);
@@ -122,6 +123,8 @@ process.on('message', (m: BrokerIn) => {
     restartCount = 0;
     proc?.kill(); // its exit handler no-ops once spawnCapture reassigns proc
     spawnCapture();
+  } else if (m.t === 'boost') {
+    noteLookupMiss();
   } else if (m.t === 'stop') {
     stop();
   }

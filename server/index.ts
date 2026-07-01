@@ -27,7 +27,12 @@ import {
 import { FlowTracker } from './flow-tracker';
 import { WsHub } from './ws';
 import { logEvent, exportNdjson, resetLog } from './logger';
-import { startProcessPolling, stopProcessPolling, setProcessTable } from './process-names';
+import {
+  startProcessPolling,
+  stopProcessPolling,
+  setProcessTable,
+  noteLookupMiss,
+} from './process-names';
 import type { BrokerIn, BrokerOut } from './priv-broker';
 import { WS_PORT, HTTP_PORT, BIND_HOST, IS_LOCAL_BIND, TOKEN } from './config';
 
@@ -358,6 +363,17 @@ async function main(): Promise<void> {
     ws.homeUpdate(homeAirports);
   }
 
+  // Adaptive lsof boost: inline mode polls directly; brokered mode forwards a
+  // (debounced) IPC nudge to the root broker, which owns the poller.
+  let sendProcessBoost: () => void = () => noteLookupMiss();
+  let lastBoostSent = 0;
+  const onProcessMiss = () => {
+    const now = Date.now();
+    if (now - lastBoostSent < 300) return;
+    lastBoostSent = now;
+    sendProcessBoost();
+  };
+
   const tracker = new FlowTracker({
     getHomeAirports: () => homeAirports,
     onEvent: (e) => {
@@ -366,6 +382,7 @@ async function main(): Promise<void> {
     },
     onSourceIp: (ip) => sourceIpHits.set(ip, (sourceIpHits.get(ip) ?? 0) + 1),
     selfProbeIps,
+    onProcessMiss,
   });
 
   const refreshHome = () =>
@@ -489,6 +506,7 @@ async function main(): Promise<void> {
       }
     };
     sendBroker({ t: 'init', backend, iface });
+    sendProcessBoost = () => sendBroker({ t: 'boost' }); // the broker owns lsof
     dropPrivileges(target); // everything below this line runs as the invoking user
     assertPrivilegesDropped(true, ws);
     return {

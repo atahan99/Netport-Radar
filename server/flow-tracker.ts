@@ -65,7 +65,14 @@ export interface FlowTrackerOpts {
   onEvent: (e: FlightEvent) => void;
   onSourceIp: (ip: string) => void; // feed home-airport detection
   selfProbeIps?: Set<string>; // geo-lookup provider IPs — never become flights
+  // A young flow is still unattributed — ask the lsof poller to hurry up
+  // (adaptive cadence). Debounced downstream; safe to call every tick.
+  onProcessMiss?: () => void;
 }
+
+// Only poke the poller for flows younger than this — if lsof hasn't seen the
+// socket by now (retention window passed), it never will.
+const PROCESS_MISS_WINDOW_MS = 5000;
 
 export class FlowTracker {
   private flows = new Map<string, Flow>();
@@ -393,12 +400,17 @@ export class FlowTracker {
     return homes.find((h) => h.ip === localIp) ?? homes.find((h) => h.id === 'primary') ?? homes[0];
   }
 
-  // Look up the owning process (lsof poll catches up within ~2s). Returns true
-  // on the tick it first resolves, so the caller can emit a recolor patch.
+  // Look up the owning process (lsof poll catches up within ~2s, faster while
+  // boosted). Returns true on the tick it first resolves, so the caller can
+  // emit a recolor patch.
   private resolveProcess(flow: Flow): boolean {
     if (flow.processResolved) return false;
     const proc = lookupProcess(flow.flight.srcPort, flow.flight.protocol);
-    if (!proc) return false;
+    if (!proc) {
+      // Young flow with no attribution → boost the lsof cadence.
+      if (Date.now() - flow.createdAt < PROCESS_MISS_WINDOW_MS) this.opts.onProcessMiss?.();
+      return false;
+    }
     const f = flow.flight;
     f.process = proc.process;
     f.processRaw = proc.processRaw;
