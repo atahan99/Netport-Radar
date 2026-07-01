@@ -44,6 +44,10 @@ const AIRPORT_OPTS: [FilterState['airportFilter'], string][] = [
   ['primary', 'Primary'],
   ['vpn', 'VPN'],
 ];
+const TRAIL_OPTS: [FilterState['trailStyle'], string][] = [
+  ['livery', 'App colors'],
+  ['altitude', 'Altitude'],
+];
 
 function SectionLabel({ children }: { children: React.ReactNode }) {
   return (
@@ -209,6 +213,11 @@ export default function FilterPanel() {
           <div>
             <SectionLabel>Home airport</SectionLabel>
             <Segmented ariaLabel="Home airport" value={s.airportFilter} onChange={s.setAirportFilter} options={AIRPORT_OPTS} />
+          </div>
+
+          <div>
+            <SectionLabel>Trail colors</SectionLabel>
+            <Segmented ariaLabel="Trail colors" value={s.trailStyle} onChange={s.setTrailStyle} options={TRAIL_OPTS} />
           </div>
 
           <Button

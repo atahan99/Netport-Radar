@@ -8,6 +8,8 @@ const _fwd = new THREE.Vector3();
 const _proj = new THREE.Vector3();
 const _right = new THREE.Vector3();
 const _m = new THREE.Matrix4();
+const _qRoll = new THREE.Quaternion();
+const FORWARD = new THREE.Vector3(0, 0, 1);
 
 /** Widen lng orbit offset by 1/cos(lat) so circles stay round away from the equator. */
 export function correctedLngOffset(dLng: number, lat: number): number {
@@ -21,12 +23,14 @@ export function markerHeadingDeg(heading: number): number {
 
 /**
  * Orient a plane mesh on the globe: up = radial from center, forward = tangent
- * toward `forwardTarget` projected onto the tangent plane.
+ * toward `forwardTarget` projected onto the tangent plane. Optional `roll`
+ * (radians) banks the plane around its forward axis (positive = right wing down).
  */
 export function orientPlaneMesh(
   position: THREE.Vector3,
   forwardTarget: THREE.Vector3,
   target?: THREE.Quaternion,
+  roll = 0,
 ): THREE.Quaternion {
   const q = target ?? new THREE.Quaternion();
   _up.copy(position).normalize();
@@ -37,5 +41,10 @@ export function orientPlaneMesh(
   _fwd.normalize();
   _right.crossVectors(_up, _fwd).normalize();
   _m.makeBasis(_right, _up, _fwd);
-  return q.setFromRotationMatrix(_m);
+  q.setFromRotationMatrix(_m);
+  if (roll) {
+    _qRoll.setFromAxisAngle(FORWARD, roll);
+    q.multiply(_qRoll);
+  }
+  return q;
 }

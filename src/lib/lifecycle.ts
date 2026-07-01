@@ -36,6 +36,13 @@ function orbit(
 
 export function lifecyclePose(f: Flight, t: number): Pose {
   if (f.phase === 'landed') {
+    // Ease the touchdown shrink+fade over ~400ms instead of snapping. Flights
+    // without a landedAt timestamp (or under reduced motion) get the final pose.
+    if (f.landedAt !== undefined && !reducedMotion()) {
+      const k = Math.min(1, Math.max(0, (Date.now() - f.landedAt) / 400));
+      const e = 1 - (1 - k) * (1 - k); // ease-out
+      return { dLat: 0, dLng: 0, scale: 1 - 0.15 * e, opacity: 1 - 0.7 * e };
+    }
     return { dLat: 0, dLng: 0, scale: 0.85, opacity: 0.3 };
   }
   // Reduced motion: no orbit / no spool pulse — a static plane (LAN keeps its

@@ -90,6 +90,7 @@ export default function Legend() {
         <div className="mb-1 mt-3 font-mono text-[10px] uppercase tracking-wide text-zinc-500">Lines &amp; rings</div>
         <ul className="space-y-0.5 text-zinc-400">
           <li>— solid arc · - - dashed arc = VPN</li>
+          <li>· · · dotted line = planned route (selected flight)</li>
           <li>○ white ring = home · ○ purple = VPN exit</li>
           <li>LAN traffic orbits home · stealth is semi-transparent</li>
           <li>?? = unknown shelf · ~CC = country-centroid guess</li>
