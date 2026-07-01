@@ -32,7 +32,7 @@ capture path never injects, blocks, or modifies traffic.
 │            ▼               │   WS     │        │                        │
 │ FlowTracker                │  :8090   │        ▼                        │
 │  server/flow-tracker.ts    │ ───────► │ MapView (MapLibre, DOM markers) │
-│  • 5-tuple → Flow          │  JSON    │ GlobeView (three.js meshes)     │
+│  • host//64-merged keys    │  JSON    │ GlobeView (three.js meshes)     │
 │  • phase machine           │ batches  │ Boards / FlightCard / Metrics   │
 │  • bytes, bps, DNS hold    │  /100ms  │                                 │
 │            │ FlightEvent   │          └─────────────────────────────────┘
@@ -59,8 +59,8 @@ capture path never injects, blocks, or modifies traffic.
 |---|---|
 | `config.ts` | Ports, bind host, token (all server tunables) |
 | `capture.ts` | Backend detect (tshark → tcpdump → stub), line parsers, geoip, reverse-DNS cache |
-| `flow-tracker.ts` | Packets → flows (5-tuple key), phase machine, metrics, classification |
-| `process-names.ts` | `lsof -i -nP +c0 -FpcPn` poll (2s) → `proto:port` → owning app + PID |
+| `flow-tracker.ts` | Packets → flows (hostname//64-merging keys), phase machine, metrics, classification |
+| `process-names.ts` | `lsof -i -nP +c0 -FpcPn` poll (adaptive 0.5–2s) → `proto:port` → owning app + PID |
 | `ws.ts` | WsHub: batching, init/error replay, origin/token gate, control channel |
 | `logger.ts` | In-memory NDJSON session log (capped 200k lines), export/reset |
 | `index.ts` | Entry: preflight, home geolocation, capture supervisor, control handling, dist server |
@@ -81,20 +81,32 @@ families, LAN/IPv6, DNS density, direction, search, country isolation, view mode
 full, bump priority: landed → hold → taxi; `cruise`/`descent` are never bumped.
 Off-screen count shows in the metrics strip.
 
-**Views.** `MapView` (imperative MapLibre markers + GeoJSON arc layers),
-`GlobeView` (lazy-loaded chunk; custom three.js layer, shared geometry/material
-caches in `lib/globe-meshes.ts`). Both read `lib/lifecycle.ts` poses (taxi spool,
-hold circle, LAN orbit, landing flare).
+**Views.** `MapView` (imperative MapLibre DOM markers + GeoJSON overlays) runs
+two cadences: marker positions/poses every other frame with cached element refs
+and change-detected style writes, while the trail/route/dest GeoJSON rebuilds at
+~10Hz (`OVERLAY_MS`) — rebuilding per rAF made MapLibre re-tessellate every
+line each frame. `GlobeView` (lazy-loaded chunk) drives a custom three.js layer:
+merged low-poly aircraft meshes with shared geometry/material caches
+(`lib/globe-meshes.ts`), wingtip strobes, far-zoom LOD dots, banking in hold
+orbits, and projection-based click-to-select (no raycasting — same nearest-
+flight math as the hover tooltip). Both views read `lib/lifecycle.ts` poses
+(taxi spool, hold circle, LAN orbit, eased touchdown). Trails color by livery
+or by an FR24-style altitude ramp (`lib/trail-color.ts`, toggled in Filters);
+the selected flight also gets its remaining route (dotted), a destination
+pin (2D), and a destination ring beacon (3D).
 
 **Livery precedence.** Resolved process brand color (`lib/livery.ts`) beats
 hostname-hash color; late process resolution recolors markers + meshes in place.
 
 **Theming** (`lib/themes.ts`, 7 themes). The 2D map recolors dark-matter paint by
 layer type (`lib/map-recolor.ts`, applied live via a `[theme]` effect — no reload)
-or swaps base style (Positron/Esri raster). The 3D globe is the vector analogue:
-themed maps draw a flat ocean sphere + Natural Earth country polygons
-(`public/geo/`); Satellite/Midnight use a real photo. Phase colors live in
-`lib/phase.ts` (shared by legend/board/card).
+or swaps base style (Positron/Esri raster). The 3D globe uses the **same palette**:
+`lib/globe-material.ts` builds an unlit material whose fragment shader remaps the
+earth texture's luminance bands (ocean ≈ 0–0.03, land ≈ 0.05–0.13) to the theme's
+water/land colors — Midnight/Arctic use the exact Carto dark-matter/Positron
+values, recolored themes reuse their `mapRecolor` palette, Satellite keeps the
+photo. Natural Earth polygons (`public/geo/`) contribute border strokes only.
+Phase colors live in `lib/phase.ts` (shared by legend/board/card).
 
 **Demo mode.** `VITE_DEMO=1` swaps `useLiveFlights` for `lib/demo.ts` (simulated
 flights; hidden keys R = reconnect overlay, B = burst 200).
@@ -131,16 +143,23 @@ is a command to the broker; the parent can't re-elevate. Falls back to the
 
 ## Process attribution
 
-`process-names.ts` polls `lsof -i -nP +c0 -FpcPn` every **2s** and keys on
-`proto:localPort`. Short-lived flows that close before the next poll stay
-`process: '—'`. UDP ephemeral port reuse can collide. Non-sudo runs only see the
-current user's sockets. Late resolution emits `updated` and recolors markers.
+`process-names.ts` polls `lsof -i -nP +c0 -FpcPn` keyed on `proto:localPort`,
+with an **adaptive cadence**: when the flow tracker sees a young unattributed
+flow it signals a miss (`onProcessMiss` → debounced `boost` IPC to the root
+broker in privilege-separated runs), which triggers an immediate poll and holds
+a 500ms interval for ~6s; idle cadence is 2s. Flows that close before any poll
+stay `process: '—'`; UDP ephemeral port reuse can collide; non-sudo runs only
+see the current user's sockets. Late resolution emits `updated` and recolors
+markers + meshes.
 
-## IPv6 merge status
+## IPv4/IPv6 merge status
 
-Flow keys are literal-IP 5-tuples — the same logical connection over IPv4 and
-IPv6 is **two flights** today. Merge by resolved hostname or IPv6 `/64` is
-planned; not implemented yet.
+Flow keys merge across address families: a resolved hostname (SNI or reverse
+DNS) keys the flow as `localIp>host:hostname:port:proto`, so v4 + v6 flows to
+the same host become **one flight** (late resolution re-keys and absorbs the
+duplicate, combining byte counters). Hostless IPv6 flows merge within their
+`/64`. The residual gap: until a hostname resolves, a v4 + v6 pair renders as
+two flights.
 
 ## Livery
 
@@ -164,7 +183,7 @@ load failures (globe). Surfaced as amber hints in the metrics strip + toasts;
 ## Testing & conventions
 
 - **Verification gate:** `npm run check` = `tsc -b` + `tsc -p
-  tsconfig.server.json` + eslint + vitest (148 tests; pure logic in `tests/*.ts`,
+  tsconfig.server.json` + eslint + vitest (151 tests; pure logic in `tests/*.ts`,
   component tests in `tests/*.test.tsx` on happy-dom). Enforced in CI
   (`.github/workflows/ci.yml`).
 - **Browser smoke / visual checks** run via the Cursor browser or Playwright MCP
