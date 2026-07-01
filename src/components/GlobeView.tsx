@@ -6,25 +6,28 @@ import { useFiltersStore } from '@/store/filters';
 import { getRenderQueueMemo } from '@/lib/render-queue';
 import { flightEndpoints } from '@/lib/arc';
 import {
-  resolveGlobeImage,
   globeBorderColor,
   useVectorPolygons,
   polygonCapColor,
   polygonSideColor,
   polygonStrokeColor,
   homeRingColor,
-  pathGradientColors,
+  rgba,
 } from '@/lib/globe-color';
+import { globeMaterialFor } from '@/lib/globe-material';
 import { correctedLngOffset, orientPlaneMesh } from '@/lib/mesh-orientation';
 import { interpolateArc, arcPoints, greatCircleKm, arcAltitude } from '@/lib/interpolate';
 import {
   createPlaneMesh,
   setPlaneSelected,
+  setPlaneLOD,
   recolorPlane,
   disposeUnusedMaterials,
   triggerLandingFlare,
   updateLandingFlare,
+  updateStrobes,
 } from '@/lib/globe-meshes';
+import { trailPathColors } from '@/lib/trail-color';
 import { lifecyclePose } from '@/lib/lifecycle';
 import { liveProgress } from '@/lib/anim';
 import { reducedMotion } from '@/lib/motion';
@@ -36,6 +39,15 @@ import type { Flight, HomeAirport } from '@/types';
 
 const asF = (d: object) => d as Flight;
 const TRAIL_STEPS = 16;
+const TRAIL_STEPS_SEL = 32; // higher resolution for the selected flight
+const REMAIN_STEPS = 24; // remaining-route samples (selected flight only)
+const BANK_RAD = 0.45; // bank angle while circling (hold / LAN orbit)
+// LOD: beyond this camera distance from the globe center (radius 100), planes
+// render as dots instead of detailed silhouettes. ~altitude 1.8 in globe units.
+const LOD_FAR_DIST = 280;
+
+// Trail entry: a flight, or the selected flight's remaining (estimated) route.
+type TrailDatum = Flight & { __remaining?: boolean };
 
 // Stable empty list so react-globe.gl doesn't rebuild polygons every render when
 // the theme has no country layer (Midnight / Satellite keep the photo earth).
@@ -83,6 +95,8 @@ export default function GlobeView() {
   // mirrors the (now-10Hz) customLayerData so the ticker knows which flights exist.
   const meshById = useRef(new Map<string, THREE.Object3D>());
   const renderedRef = useRef<Flight[]>([]);
+  // Camera-far flag (LOD), computed once per frame by the rAF ticker.
+  const farRef = useRef(false);
 
   const [size, setSize] = useState({ w: window.innerWidth, h: window.innerHeight });
   useEffect(() => {
@@ -98,14 +112,14 @@ export default function GlobeView() {
     };
   });
 
-  // 3D globe surface per theme. Themed themes get a flat ocean-colored texture
-  // (country land + borders are drawn as polygons below) — the 3D analogue of the
-  // 2D vector map; Midnight/Satellite keep the realistic earth photo. It is always
-  // a real image URL (never undefined) so react-globe.gl reloads it reliably.
-  const globeImage = resolveGlobeImage(theme);
+  // 3D globe surface per theme: a shader-recolored real earth (luminance →
+  // water/land remap, cached per theme in lib/globe-material.ts). The texture
+  // is managed by the material, so globeImageUrl stays null — three-globe must
+  // not stomp the material's map.
+  const globeMaterial = useMemo(() => globeMaterialFor(theme), [theme]);
 
-  // Country shapes for the themed vector globe (land polygons + borders), vendored
-  // locally. Fetched once when the globe mounts; absent until then (sphere only).
+  // Country shapes for the themed border strokes, vendored locally. Fetched
+  // once when the globe mounts; absent until then (sphere only).
   const [countries, setCountries] = useState<object[]>([]);
   useEffect(() => {
     let alive = true;
@@ -120,16 +134,11 @@ export default function GlobeView() {
     };
   }, []);
 
-  // Polygon colors — stable per theme so react-globe.gl doesn't rebuild every
-  // render. Land = globeLand fill (slightly translucent so the home ring and
-  // destination dots on the surface still show through); border = the theme's 2D
-  // line color (or accent) for a crisp themed outline.
-  const landFill = theme.globeLand;
+  // Polygon accessors — stable per theme so react-globe.gl doesn't rebuild
+  // every render. Caps are transparent (the terrain comes from the shader
+  // material); polygons contribute crisp themed border strokes only.
   const borderColor = globeBorderColor(theme);
-  const polygonCapColorFn = useCallback(
-    () => polygonCapColor(landFill),
-    [landFill],
-  );
+  const polygonCapColorFn = useCallback(() => polygonCapColor(), []);
   const polygonStrokeColorFn = useCallback(() => polygonStrokeColor(borderColor), [borderColor]);
   const polygonSideColorFn = useCallback(() => polygonSideColor(), []);
   const polygonsData = useVectorPolygons(theme) ? countries : NO_POLYGONS;
@@ -150,19 +159,21 @@ export default function GlobeView() {
     renderedRef.current = rendered;
   }, [rendered]);
 
-  const [trailData, setTrailData] = useState<Flight[]>([]);
+  const [trailData, setTrailData] = useState<TrailDatum[]>([]);
   const [destData, setDestData] = useState<DestDot[]>([]);
   useEffect(() => {
     const tick = () => {
-      const fl = useFlightsStore.getState().flights;
+      const { flights: fl, selectedFlightId } = useFlightsStore.getState();
       const ft = useFiltersStore.getState();
       const q = getRenderQueueMemo(fl, ft);
       const set = [...q.mainQueue, ...q.dnsQueue];
-      setTrailData(
-        set.filter(
-          (f) => !f.isLan && (f.phase === 'cruise' || f.phase === 'hold' || f.phase === 'descent'),
-        ),
+      const trails: TrailDatum[] = set.filter(
+        (f) => !f.isLan && (f.phase === 'cruise' || f.phase === 'hold' || f.phase === 'descent'),
       );
+      // Selected flight: append its remaining route as a dotted path entry.
+      const sel = selectedFlightId ? trails.find((f) => f.id === selectedFlightId) : undefined;
+      if (sel && liveProgress(sel) < 1) trails.push({ ...sel, __remaining: true });
+      setTrailData(trails);
       const m = new Map<string, DestDot>();
       for (const f of set) {
         const e = m.get(f.country);
@@ -189,7 +200,20 @@ export default function GlobeView() {
       const f = asF(d);
       const ep = flightEndpoints(homeById(f.homeAirportId), f);
       const baseAlt = arcAltitude(greatCircleKm(ep.startLat, ep.startLng, ep.endLat, ep.endLng));
-      const pts = arcPoints(ep.startLat, ep.startLng, ep.endLat, ep.endLng, f.arcProgress, TRAIL_STEPS);
+      if ((d as TrailDatum).__remaining) {
+        // Remaining (estimated) route: fixed sample count from the plane's
+        // current position to the destination, following the arc altitude.
+        const prog = Math.min(1, liveProgress(f));
+        const out: [number, number, number][] = [];
+        for (let i = 0; i <= REMAIN_STEPS; i++) {
+          const t = prog + (1 - prog) * (i / REMAIN_STEPS);
+          const p = interpolateArc(ep.startLat, ep.startLng, ep.endLat, ep.endLng, t);
+          out.push([p.lat, p.lng, baseAlt * Math.sin(t * Math.PI) + 0.004]);
+        }
+        return out;
+      }
+      const steps = f.id === selRef.current ? TRAIL_STEPS_SEL : TRAIL_STEPS;
+      const pts = arcPoints(ep.startLat, ep.startLng, ep.endLat, ep.endLng, f.arcProgress, steps);
       const n = pts.length;
       return pts.map((pt, i) => {
         const alt = baseAlt * Math.sin(((i / (n - 1)) * f.arcProgress) * Math.PI) + 0.004;
@@ -198,17 +222,54 @@ export default function GlobeView() {
     },
     [homeById],
   );
-  const pathColor = useCallback((d: object): string[] => pathGradientColors(asF(d).liveryColor, TRAIL_STEPS), []);
+  const pathColor = useCallback((d: object): string[] => {
+    const f = asF(d);
+    if ((d as TrailDatum).__remaining) {
+      return new Array<string>(REMAIN_STEPS + 1).fill(rgba(f.liveryColor, 0.35));
+    }
+    const steps = f.id === selRef.current ? TRAIL_STEPS_SEL : TRAIL_STEPS;
+    return trailPathColors(f.liveryColor, steps, f.arcProgress, useFiltersStore.getState().trailStyle);
+  }, []);
   const pathPointAlt = useCallback((p: unknown) => (p as number[])[2], []);
-  const pathDashLength = useCallback((d: object) => (isVpn(asF(d)) ? 0.5 : 1), [isVpn]);
-  const pathDashGap = useCallback((d: object) => (isVpn(asF(d)) ? 0.3 : 0), [isVpn]);
+  const pathStroke = useCallback((d: object) => ((d as TrailDatum).__remaining ? 1.1 : 1.6), []);
+  const pathDashLength = useCallback(
+    (d: object) => ((d as TrailDatum).__remaining ? 0.05 : isVpn(asF(d)) ? 0.5 : 1),
+    [isVpn],
+  );
+  const pathDashGap = useCallback(
+    (d: object) => ((d as TrailDatum).__remaining ? 0.04 : isVpn(asF(d)) ? 0.3 : 0),
+    [isVpn],
+  );
 
   const ringLat = useCallback((d: object) => (d as HomeAirport).lat, []);
   const ringLng = useCallback((d: object) => (d as HomeAirport).lng, []);
   const ringColor = useCallback(
-    (d: object) => () => homeRingColor((d as HomeAirport).isVpn),
+    (d: object) => () =>
+      (d as { __color?: string }).__color ?? homeRingColor((d as HomeAirport).isVpn),
     [],
   );
+
+  // Destination beacon: a livery-colored ring pulse at the selected flight's
+  // destination. Memoized on scalars so the ring datum keeps its identity
+  // across 10Hz store pushes (a new object would restart the pulse animation).
+  const selFlight = selectedId ? flights.find((x) => x.id === selectedId) : undefined;
+  const destLat = selFlight?.dstLat;
+  const destLng = selFlight?.dstLng;
+  const destColor = selFlight?.liveryColor;
+  const showDestRing = !!selFlight && !selFlight.isLan && selFlight.geoConfidence !== 'none';
+  const ringData = useMemo(() => {
+    if (!showDestRing || destLat === undefined || destLng === undefined) return homeAirports;
+    const dest = {
+      id: '__dest',
+      label: '',
+      lat: destLat,
+      lng: destLng,
+      ip: '',
+      isVpn: false,
+      __color: destColor,
+    };
+    return [...homeAirports, dest];
+  }, [homeAirports, showDestRing, destLat, destLng, destColor]);
   const labelText = useCallback((d: object) => (d as HomeAirport).label, []);
   const labelColor = useCallback(
     (d: object) => homeRingColor((d as HomeAirport).isVpn),
@@ -251,10 +312,19 @@ export default function GlobeView() {
       const c = g.getCoords(p.lat + oLat, p.lng + oLng, alt);
       _pos.set(c.x, c.y, c.z);
       o.position.copy(_pos);
+      // Forward hint uses the pose slightly in the future so orbiting planes
+      // (hold circles / LAN) face along their actual motion, not just the arc.
       const np = interpolateArc(ep.startLat, ep.startLng, ep.endLat, ep.endLng, Math.min(1, progress + 0.01));
-      const nc = g.getCoords(np.lat + oLat, np.lng + oLng, alt);
+      const pose2 = lifecyclePose(f, now + 130);
+      const nc = g.getCoords(
+        np.lat + pose2.dLat,
+        np.lng + correctedLngOffset(pose2.dLng, p.lat),
+        alt,
+      );
       _fwdHint.set(nc.x, nc.y, nc.z);
-      orientPlaneMesh(_pos, _fwdHint, o.quaternion);
+      // Bank into the turn while circling (hold / LAN orbit).
+      const banking = !reducedMotion() && (f.phase === 'hold' || (f.isLan && f.phase !== 'landed'));
+      orientPlaneMesh(_pos, _fwdHint, o.quaternion, banking ? BANK_RAD : 0);
       setPlaneSelected(o, f.id === selRef.current);
       // Taxi spool / landed shrink layers on top of the selection scale.
       o.scale.multiplyScalar(pose.scale);
@@ -265,6 +335,8 @@ export default function GlobeView() {
         o.userData.phase = f.phase;
       }
       updateLandingFlare(o, now);
+      setPlaneLOD(o, farRef.current);
+      updateStrobes(o, now, !reducedMotion() && !farRef.current && f.phase !== 'landed');
     },
     [homeById],
   );
@@ -287,6 +359,8 @@ export default function GlobeView() {
       const g = globe.current as unknown as GlobeApi | null;
       if (g) {
         const now = performance.now();
+        const cp = g.camera().position;
+        farRef.current = Math.hypot(cp.x, cp.y, cp.z) > LOD_FAR_DIST;
         const meshes = meshById.current;
         for (const f of renderedRef.current) {
           const o = meshes.get(f.id);
@@ -302,48 +376,85 @@ export default function GlobeView() {
     };
   }, [updateMesh]);
 
-  // Hover tooltip: project the rendered flights and show the nearest within 12px
-  // of the pointer (throttled ~30Hz). No raycasting.
-  const lastTip = useRef(0);
-  const onTipMove = useCallback(
-    (e: React.PointerEvent) => {
-      const now = performance.now();
-      if (now - lastTip.current < 33) return;
-      lastTip.current = now;
+  // Nearest rendered flight within `radiusPx` of a screen point, by projecting
+  // each flight's arc position (same approach as the tooltip — no raycasting,
+  // and a generous FR24-style hit radius since the planes are small).
+  const findFlightAt = useCallback(
+    (x: number, y: number, radiusPx: number): Flight | null => {
       const g = globe.current as unknown as GlobeApi | null;
-      if (!g) return;
+      if (!g) return null;
       let best: Flight | null = null;
-      let bestD = 12 * 12;
+      let bestD = radiusPx * radiusPx;
       for (const f of renderedRef.current) {
         const ep = flightEndpoints(homeById(f.homeAirportId), f);
         const p = interpolateArc(ep.startLat, ep.startLng, ep.endLat, ep.endLng, liveProgress(f));
         const sc = g.getScreenCoords(p.lat, p.lng, 0.02);
-        const dx = sc.x - e.clientX;
-        const dy = sc.y - e.clientY;
+        const dx = sc.x - x;
+        const dy = sc.y - y;
         const dd = dx * dx + dy * dy;
         if (dd < bestD) {
           bestD = dd;
           best = f;
         }
       }
-      if (best) showTip(e.clientX, e.clientY, flightTipText(best));
-      else hideTip();
+      return best;
     },
     [homeById],
   );
 
+  // Hover tooltip + pointer cursor (throttled ~30Hz).
+  const containerRef = useRef<HTMLDivElement>(null);
+  const lastTip = useRef(0);
+  const onTipMove = useCallback(
+    (e: React.PointerEvent) => {
+      const now = performance.now();
+      if (now - lastTip.current < 33) return;
+      lastTip.current = now;
+      const best = findFlightAt(e.clientX, e.clientY, 12);
+      if (containerRef.current) containerRef.current.style.cursor = best ? 'pointer' : '';
+      if (best) showTip(e.clientX, e.clientY, flightTipText(best));
+      else hideTip();
+    },
+    [findFlightAt],
+  );
+
+  // Click-to-select: a pointerup that didn't drag selects the nearest plane;
+  // clicking empty globe clears the selection (parity with the 2D map).
+  const downPos = useRef<{ x: number; y: number } | null>(null);
+  const onPointerDown = useCallback((e: React.PointerEvent) => {
+    downPos.current = { x: e.clientX, y: e.clientY };
+  }, []);
+  const onPointerUp = useCallback(
+    (e: React.PointerEvent) => {
+      const d = downPos.current;
+      downPos.current = null;
+      if (!d || Math.hypot(e.clientX - d.x, e.clientY - d.y) > 5) return; // drag, not a click
+      const f = findFlightAt(e.clientX, e.clientY, 14);
+      useFlightsStore.getState().selectFlight(f ? f.id : null);
+    },
+    [findFlightAt],
+  );
+
   return (
-    <div className="absolute inset-0" onPointerMove={onTipMove} onPointerLeave={hideTip}>
+    <div
+      ref={containerRef}
+      className="absolute inset-0"
+      onPointerMove={onTipMove}
+      onPointerLeave={hideTip}
+      onPointerDown={onPointerDown}
+      onPointerUp={onPointerUp}
+    >
       <Globe
         ref={globe}
         width={size.w}
         height={size.h}
-        globeImageUrl={globeImage}
+        globeImageUrl={null}
+        globeMaterial={globeMaterial}
         backgroundImageUrl="/textures/night-sky.png"
         backgroundColor="#000000"
         atmosphereColor={theme.atmosphere}
-        atmosphereAltitude={0.16}
-        /* themed vector globe — country land polygons + border strokes */
+        atmosphereAltitude={theme.atmosphereAlt ?? 0.16}
+        /* themed globe — country border strokes over the recolored terrain */
         polygonsData={polygonsData}
         polygonCapColor={polygonCapColorFn}
         polygonSideColor={polygonSideColorFn}
@@ -382,12 +493,12 @@ export default function GlobeView() {
         pathPoints={pathPoints}
         pathPointAlt={pathPointAlt}
         pathColor={pathColor}
-        pathStroke={1.6}
+        pathStroke={pathStroke}
         pathDashLength={pathDashLength}
         pathDashGap={pathDashGap}
         pathTransitionDuration={0}
-        /* home airports */
-        ringsData={homeAirports}
+        /* home airports + destination beacon (selected flight) */
+        ringsData={ringData}
         ringLat={ringLat}
         ringLng={ringLng}
         ringColor={ringColor}
