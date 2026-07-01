@@ -30,8 +30,10 @@ export function useVectorPolygons(theme: Theme): boolean {
   return !!theme.globeLand;
 }
 
-export function polygonCapColor(landFill: string | undefined): string {
-  return landFill ? rgba(landFill, 0.82) : 'rgba(0,0,0,0)';
+// Caps are fully transparent: the land itself comes from the shader-recolored
+// earth texture (lib/globe-material.ts); polygons only contribute border strokes.
+export function polygonCapColor(): string {
+  return 'rgba(0,0,0,0)';
 }
 
 export function polygonSideColor(): string {
@@ -47,10 +49,14 @@ export function homeRingColor(isVpn: boolean): string {
   return isVpn ? '#8b5cf6' : '#ffffff';
 }
 
-/** Gradient trail colors along an arc path. */
+/** Gradient trail colors along an arc path — quadratic ramp so the trail
+ * stays faint near the origin and brightens sharply toward the plane. */
 export function pathGradientColors(liveryColor: string, steps: number): string[] {
   const n = steps + 1;
   const out: string[] = [];
-  for (let i = 0; i < n; i++) out.push(rgba(liveryColor, (i / (n - 1)) * 0.9));
+  for (let i = 0; i < n; i++) {
+    const t = i / (n - 1);
+    out.push(rgba(liveryColor, t * t * 0.9));
+  }
   return out;
 }

@@ -32,11 +32,13 @@ export interface Theme {
   label: string;
   accent: string; // HUD accent (--theme-accent)
   atmosphere: string; // globe atmosphere glow
+  atmosphereAlt?: number; // atmosphere thickness (default 0.16)
   globeTint: string; // multiplies the earth texture (white = untinted)
   globeImageUrl: string; // earth texture
-  // Optional two-color recolor of the 3D globe surface: the earth texture's
-  // luminance is remapped to these land/water colors in the fragment shader,
-  // mirroring the 2D map recolor. Absent = realistic texture (Midnight/Satellite).
+  // Two-color recolor of the 3D globe surface: the earth texture's luminance
+  // is remapped to these land/water colors in the fragment shader
+  // (lib/globe-material.ts), mirroring the 2D map recolor. Absent = realistic
+  // photo texture (Satellite).
   globeLand?: string;
   globeWater?: string;
   globeBorder?: string; // globe country borders (else falls back to mapRecolor.line ?? accent)
@@ -76,11 +78,11 @@ export const THEMES: Theme[] = [
     atmosphere: '#3a82ff',
     globeTint: '#ffffff',
     globeImageUrl: EARTH_DARK,
-    // Vector globe matching the 2D dark-matter map: dark gray-blue land, near-black
-    // ocean, subtle gray borders (the realistic photo read as nearly pure black).
-    globeLand: '#31343d',
-    globeWater: '#0c0d12',
-    globeBorder: '#474c57',
+    // Exact Carto dark-matter palette (2D basemap): near-black land, gray-blue
+    // water, the style's country-boundary gray. The globe IS the 2D map.
+    globeLand: '#0e0e0e',
+    globeWater: '#2c353c',
+    globeBorder: '#666666',
     bg: '#000000',
     mapStyle: DARK,
   },
@@ -91,8 +93,10 @@ export const THEMES: Theme[] = [
     atmosphere: '#00ff66',
     globeTint: '#4dff9e',
     globeImageUrl: EARTH_DARK,
-    globeLand: '#0f8a47',
-    globeWater: '#031c10',
+    // Same palette as the 2D recolor below: continents = background, oceans =
+    // water, borders = line (via the globeBorderColor fallback).
+    globeLand: '#072a17',
+    globeWater: '#00110b',
     bg: '#000a04',
     mapStyle: DARK,
     // background = continents (at world zoom the visible "land" is the basemap
@@ -105,10 +109,11 @@ export const THEMES: Theme[] = [
     label: 'Cyberpunk',
     accent: '#ff3cac',
     atmosphere: '#ff2bd6',
+    atmosphereAlt: 0.2,
     globeTint: '#ff86e2',
     globeImageUrl: EARTH_DARK,
-    globeLand: '#5a1aa8',
-    globeWater: '#0c0024',
+    globeLand: '#1c0a3a',
+    globeWater: '#0a0018',
     bg: '#0a0016',
     mapStyle: DARK,
     mapRecolor: { background: '#1c0a3a', water: '#0a0018', land: '#24114a', line: '#ff45b0', text: '#46ecff' },
@@ -120,8 +125,8 @@ export const THEMES: Theme[] = [
     atmosphere: '#ffb000',
     globeTint: '#ffcf73',
     globeImageUrl: EARTH_DARK,
-    globeLand: '#7a4a00',
-    globeWater: '#1a0e00',
+    globeLand: '#2a1800',
+    globeWater: '#0c0600',
     bg: '#0a0600',
     mapStyle: DARK,
     mapRecolor: { background: '#2a1800', water: '#0c0600', land: '#352000', line: '#e09600', text: '#ffd166' },
@@ -133,8 +138,8 @@ export const THEMES: Theme[] = [
     atmosphere: '#1e6fff',
     globeTint: '#74a8ff',
     globeImageUrl: EARTH_DARK,
-    globeLand: '#1e5ac0',
-    globeWater: '#02132f',
+    globeLand: '#0c2147',
+    globeWater: '#00163a',
     bg: '#00040d',
     mapStyle: DARK,
     mapRecolor: { background: '#0c2147', water: '#00163a', land: '#0e2a55', line: '#4a90ff', text: '#9cc4ff' },
@@ -144,10 +149,14 @@ export const THEMES: Theme[] = [
     label: 'Arctic',
     accent: '#0ea5e9',
     atmosphere: '#aee3ff',
+    atmosphereAlt: 0.12,
     globeTint: '#dff0ff',
     globeImageUrl: EARTH_DARK,
-    globeLand: '#dce9f5',
-    globeWater: '#8fb4d6',
+    // Exact Carto Positron palette (2D basemap): near-white land, pale
+    // blue-gray water, neutral gray borders.
+    globeLand: '#fafaf8',
+    globeWater: '#d4dadc',
+    globeBorder: '#9aa0a6',
     bg: '#0a1118',
     mapStyle: POSITRON, // real light basemap
   },

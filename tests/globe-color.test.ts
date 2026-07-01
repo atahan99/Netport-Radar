@@ -41,7 +41,7 @@ describe('resolveGlobeImage', () => {
 
 describe('globeBorderColor', () => {
   it('prefers globeBorder, then mapRecolor.line, then accent', () => {
-    expect(globeBorderColor(THEME_BY_ID.midnight)).toBe('#474c57');
+    expect(globeBorderColor(THEME_BY_ID.midnight)).toBe('#666666');
     expect(globeBorderColor(THEME_BY_ID.matrix)).toBe('#00c853');
     expect(globeBorderColor(THEME_BY_ID.satellite)).toBe(THEME_BY_ID.satellite.accent);
   });
@@ -55,9 +55,8 @@ describe('useVectorPolygons', () => {
 });
 
 describe('polygon colors', () => {
-  it('cap/side/stroke resolve as expected', () => {
-    expect(polygonCapColor('#31343d')).toContain('rgba(49,52,61');
-    expect(polygonCapColor(undefined)).toBe('rgba(0,0,0,0)');
+  it('caps are transparent (borders only over the shader-recolored terrain)', () => {
+    expect(polygonCapColor()).toBe('rgba(0,0,0,0)');
     expect(polygonSideColor()).toBe('rgba(0,0,0,0)');
     expect(polygonStrokeColor('#474c57')).toBe('#474c57');
   });
