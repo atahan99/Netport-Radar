@@ -246,7 +246,10 @@ export function useDemoFlights(enabled = true): void {
         lastLen = flights.length;
         transition = true; // spawn / burst
       }
-      if (transition || now - lastPush >= STORE_PUSH_MS) {
+      // Transitions push promptly but never faster than 20Hz — the live client
+      // is bounded by the server's 100ms WS batches, so a 60Hz push storm
+      // (e.g. during a burst) would be demo-only behavior React can't keep up with.
+      if ((transition && now - lastPush >= 50) || now - lastPush >= STORE_PUSH_MS) {
         lastPush = now;
         setFlights(flights.slice());
       }

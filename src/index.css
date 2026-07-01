@@ -82,7 +82,9 @@ body {
   }
 }
 
-/* One-shot landing flare: expanding ring at touchdown (descent → landed) */
+/* One-shot landing flare: expanding two-ring shockwave at touchdown
+   (descent → landed) — bright inner ring + faster, softer outer ring,
+   mirroring the 3D globe flare. */
 @keyframes flare {
   from {
     transform: scale(1);
@@ -90,6 +92,16 @@ body {
   }
   to {
     transform: scale(4);
+    opacity: 0;
+  }
+}
+@keyframes flare-outer {
+  from {
+    transform: scale(1.4);
+    opacity: 0.5;
+  }
+  to {
+    transform: scale(5.5);
     opacity: 0;
   }
 }

@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import type { ThemeName } from '@/lib/themes';
+import type { TrailStyle } from '@/lib/trail-color';
 
 export type DnsDensity = 'sample' | 'all' | 'none';
 export type Direction = 'both' | 'outbound' | 'inbound';
@@ -50,6 +51,7 @@ export interface FilterState {
   // View
   viewMode: ViewMode;
   theme: ThemeName;
+  trailStyle: TrailStyle; // livery colors vs FR24 altitude rainbow
   filterDrawerOpen: boolean;
   legendOpen: boolean;
   // Flight-card position — per view so each can default differently
@@ -64,6 +66,7 @@ export interface FilterState {
   setAirportFilter: (f: AirportFilter) => void;
   setViewMode: (m: ViewMode) => void;
   setTheme: (t: ThemeName) => void;
+  setTrailStyle: (t: TrailStyle) => void;
   toggleCardAnchor: () => void; // flips the mode for the active viewMode
   toggleFilterDrawer: () => void;
   setLegend: (open: boolean) => void;
@@ -101,6 +104,7 @@ const DEFAULTS = {
   airportFilter: 'all' as AirportFilter,
   viewMode: '2d' as ViewMode,
   theme: 'midnight' as ThemeName,
+  trailStyle: 'livery' as TrailStyle,
   cardAnchor2d: 'docked' as CardAnchorMode,
   cardAnchor3d: 'docked' as CardAnchorMode,
 };
@@ -120,6 +124,7 @@ export const useFiltersStore = create<FilterState>()(
       setAirportFilter: (airportFilter) => set({ airportFilter }),
       setViewMode: (viewMode) => set({ viewMode }),
       setTheme: (theme) => set({ theme }),
+      setTrailStyle: (trailStyle) => set({ trailStyle }),
       toggleCardAnchor: () =>
         set((s) =>
           s.viewMode === '2d'
@@ -156,6 +161,7 @@ export const useFiltersStore = create<FilterState>()(
         airportFilter: s.airportFilter,
         viewMode: s.viewMode,
         theme: s.theme,
+        trailStyle: s.trailStyle,
         cardAnchor2d: s.cardAnchor2d,
         cardAnchor3d: s.cardAnchor3d,
       }),
