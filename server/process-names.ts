@@ -7,7 +7,13 @@
 
 import { execSync } from 'child_process';
 import { normalizeProcess } from '../src/lib/livery';
-import { PROCESS_POLL_MS, PROCESS_RETAIN_MS } from './config';
+import {
+  PROCESS_POLL_MS,
+  PROCESS_POLL_BOOST_MS,
+  PROCESS_BOOST_WINDOW_MS,
+  PROCESS_POLL_MIN_MS,
+  PROCESS_RETAIN_MS,
+} from './config';
 
 export interface ProcEntry {
   command: string;
@@ -17,8 +23,13 @@ export interface ProcEntry {
 let table = new Map<string, ProcEntry>();
 // Short-lived TCP flows can close between 2s lsof polls; retain the last mapping briefly.
 const staleRetain = new Map<string, { entry: ProcEntry; expiresAt: number }>();
-let timer: ReturnType<typeof setInterval> | undefined;
+let timer: ReturnType<typeof setTimeout> | undefined;
 let onPollCb: ((entries: [string, ProcEntry][]) => void) | undefined;
+let polling = false;
+let lastPollAt = 0;
+// Adaptive cadence: lookup misses (new unattributed flows) boost the poll rate
+// for a short window so fresh connections get their process/livery fast.
+let boostUntil = 0;
 
 function runLsof(): string {
   try {
@@ -35,6 +46,7 @@ function runLsof(): string {
 }
 
 function poll(): void {
+  lastPollAt = Date.now();
   const out = runLsof();
   if (!out) return;
 
@@ -78,16 +90,37 @@ function poll(): void {
   }
 }
 
+function scheduleNext(): void {
+  const interval = Date.now() < boostUntil ? PROCESS_POLL_BOOST_MS : PROCESS_POLL_MS;
+  timer = setTimeout(() => {
+    poll();
+    scheduleNext();
+  }, interval);
+}
+
 // `onPoll` lets the privileged broker stream each lsof result to the unprivileged
 // parent (which can't run a root lsof itself after dropping privileges).
 export function startProcessPolling(onPoll?: (entries: [string, ProcEntry][]) => void): void {
   onPollCb = onPoll;
+  polling = true;
   poll();
-  timer = setInterval(poll, PROCESS_POLL_MS);
+  scheduleNext();
 }
 
 export function stopProcessPolling(): void {
-  if (timer) clearInterval(timer);
+  polling = false;
+  if (timer) clearTimeout(timer);
+}
+
+// A lookup missed (new flow with no attribution yet): boost the cadence and —
+// debounced — poll right away so the flow colors within ~PROCESS_POLL_MIN_MS
+// instead of waiting out the idle interval. Only effective where polling runs
+// (inline mode or the root broker); the unprivileged parent just no-ops.
+export function noteLookupMiss(): void {
+  boostUntil = Date.now() + PROCESS_BOOST_WINDOW_MS;
+  if (!polling) return;
+  if (Date.now() - lastPollAt < PROCESS_POLL_MIN_MS) return;
+  poll();
 }
 
 // Parent side: inject the table received from the broker so lookupProcess works.

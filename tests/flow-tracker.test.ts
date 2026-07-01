@@ -6,6 +6,7 @@ vi.mock('../server/process-names', () => ({
   lookupProcess: vi.fn(() => null),
   startProcessPolling: vi.fn(),
   stopProcessPolling: vi.fn(),
+  noteLookupMiss: vi.fn(),
 }));
 
 import { FlowTracker, type FlowTrackerOpts } from '../server/flow-tracker';
@@ -258,6 +259,38 @@ describe('IPv4/IPv6 flow merge', () => {
     const opens = events.filter((e) => e.event === 'opened');
     expect(opens).toHaveLength(1);
     expect(opens[0].flight.bytesTotal).toBe(250);
+    tracker.stop();
+  });
+});
+
+describe('process attribution boost (adaptive lsof cadence)', () => {
+  it('signals onProcessMiss while a young flow is unattributed', async () => {
+    const misses = vi.fn();
+    const { tracker } = setup({ onProcessMiss: misses });
+    tracker.ingest(pkt({ host: 'x.com' }));
+    await vi.advanceTimersByTimeAsync(600);
+    expect(misses).toHaveBeenCalled();
+    tracker.stop();
+  });
+
+  it('stops signaling once the flow is past the miss window', async () => {
+    const misses = vi.fn();
+    const { tracker } = setup({ onProcessMiss: misses });
+    tracker.ingest(pkt({ host: 'x.com' }));
+    await vi.advanceTimersByTimeAsync(6000); // beyond PROCESS_MISS_WINDOW_MS
+    const callsAtWindowEnd = misses.mock.calls.length;
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(misses.mock.calls.length).toBe(callsAtWindowEnd);
+    tracker.stop();
+  });
+
+  it('never signals when the process resolves immediately', async () => {
+    mockLookup.mockReturnValue({ process: 'brave', processRaw: 'Brave', pid: 99 });
+    const misses = vi.fn();
+    const { tracker } = setup({ onProcessMiss: misses });
+    tracker.ingest(pkt({ host: 'x.com' }));
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(misses).not.toHaveBeenCalled();
     tracker.stop();
   });
 });
