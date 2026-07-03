@@ -7,7 +7,6 @@ import { getRenderQueueMemo } from '@/lib/render-queue';
 import { locateFlight } from '@/lib/locate';
 import { useDemoFlights } from '@/lib/demo';
 import { useLiveFlights } from '@/lib/live';
-import MapView from '@/components/MapView';
 import FlightCard from '@/components/FlightCard';
 import FilterPanel from '@/components/FilterPanel';
 import DeparturesBoard from '@/components/DeparturesBoard';
@@ -25,8 +24,15 @@ import FpsOverlay from '@/components/FpsOverlay';
 import SessionStats from '@/components/SessionStats';
 import { useDiagnosticsStore } from '@/store/diagnostics';
 
-// Code-split the 3D globe: it pulls in the ~3 MB three.js chunk, which the
-// default 2D map + first paint shouldn't have to carry. Loaded on first switch.
+// Code-split both heavy views: MapView pulls in the ~2 MB maplibre-gl chunk and
+// GlobeView the ~3 MB three.js chunk, which the entry bundle + first paint
+// shouldn't have to carry. Each is loaded on first render of its view mode.
+const MapView = lazy(() =>
+  import('@/components/MapView').catch((err) => {
+    useDiagnosticsStore.getState().recordChunkError('MapView', err);
+    throw err;
+  }),
+);
 const GlobeView = lazy(() =>
   import('@/components/GlobeView').catch((err) => {
     useDiagnosticsStore.getState().recordChunkError('GlobeView', err);
@@ -102,19 +108,15 @@ export default function App() {
       {/* Map / globe fills the screen; ErrorBoundary keeps a view crash (e.g. the
           lazy globe chunk) from white-screening the whole app. */}
       <ErrorBoundary>
-        {viewMode === '2d' ? (
-          <MapView />
-        ) : (
-          <Suspense
-            fallback={
-              <div className="absolute inset-0 flex items-center justify-center bg-black">
-                <Loader2 className="h-8 w-8 animate-spin text-zinc-600" />
-              </div>
-            }
-          >
-            <GlobeView />
-          </Suspense>
-        )}
+        <Suspense
+          fallback={
+            <div className="absolute inset-0 flex items-center justify-center bg-black">
+              <Loader2 className="h-8 w-8 animate-spin text-zinc-600" />
+            </div>
+          }
+        >
+          {viewMode === '2d' ? <MapView /> : <GlobeView />}
+        </Suspense>
       </ErrorBoundary>
 
       {/* Wordmark behind the HUD — tinted by the active theme accent (decorative) */}

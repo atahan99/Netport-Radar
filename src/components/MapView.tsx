@@ -307,6 +307,10 @@ export default function MapView() {
     // Chip declutter: ids allowed to show a chip at mid zoom (top throughput),
     // refreshed at overlay cadence.
     let topChips = new Set<string>();
+    // Overlay change-detection: signature of everything the overlay output
+    // depends on. When it's unchanged (idle flights: hold/taxi/landed), skip
+    // the whole rebuild — no GeoJSON, no setData, no re-tessellation.
+    let lastOverlaySig = '';
 
     function renderHome(homeAirports: HomeAirport[]) {
       for (const m of homeMarkers) m.remove();
@@ -399,6 +403,18 @@ export default function MapView() {
       const filters = useFiltersStore.getState();
       const { mainQueue, dnsQueue } = getRenderQueueMemo(flights, filters);
       const rendered = [...mainQueue, ...dnsQueue];
+
+      // Cheap signature of every input the overlays derive from: per-flight
+      // id/phase/progress/color/isLan (membership changes change the id list),
+      // coarse bytesPerSec (chip ranking only cares about material changes),
+      // plus selection and trail style. Unchanged ⇒ nothing below would differ,
+      // so skip the rebuild, setData calls, badge/chip/pin updates entirely.
+      let sig = `${selectedFlightId ?? ''}|${filters.trailStyle}`;
+      for (const f of rendered) {
+        sig += `|${f.id};${f.phase};${liveProgress(f).toFixed(3)};${f.liveryColor};${f.isLan ? 1 : 0};${Math.round(f.bytesPerSec / 1024)}`;
+      }
+      if (sig === lastOverlaySig) return;
+      lastOverlaySig = sig;
 
       const arcFeatures: Feature[] = [];
       const routeFeatures: Feature[] = [];
@@ -634,17 +650,14 @@ export default function MapView() {
     map.on('click', () => useFlightsStore.getState().selectFlight(null));
     map.on('dragstart', hideTip);
 
-    // Semantic updates: create/remove markers immediately on a store push +
-    // rebuild home markers on the rare home change. Overlays are NOT rebuilt
-    // here — they follow within OVERLAY_MS via the frame loop (during a burst
-    // the store pushes on every membership/phase change, and rebuilding the
-    // trail GeoJSON per push would defeat the throttle).
+    // Semantic updates: rebuild home markers on the rare home change only.
+    // Flight/selection/filter changes are NOT handled here — the ~30Hz frame
+    // loop already calls updateMarkers(), so a subscription-driven call would
+    // just duplicate that work (worst case a change shows one frame, ~33ms,
+    // later — visually identical).
     const unsubFlights = useFlightsStore.subscribe((st, prev) => {
       if (st.homeAirports !== prev.homeAirports) renderHome(st.homeAirports);
-      if (st.flights !== prev.flights || st.selectedFlightId !== prev.selectedFlightId)
-        updateMarkers();
     });
-    const unsubFilters = useFiltersStore.subscribe(() => updateMarkers());
 
     // Frame loop. Two throttles, both measured against a 150-plane burst:
     //  • markers update every OTHER frame — compositing 150+ DOM markers with
@@ -656,6 +669,12 @@ export default function MapView() {
     let lastOverlay = 0;
     let frameParity = false;
     const frame = (now: number) => {
+      // Hidden tab: rAF is throttled anyway, but skip the work outright so a
+      // background tab does zero marker/overlay updates.
+      if (document.hidden) {
+        frameRaf = requestAnimationFrame(frame);
+        return;
+      }
       frameParity = !frameParity;
       if (frameParity) updateMarkers();
       if (now - lastOverlay >= OVERLAY_MS) {
@@ -668,7 +687,6 @@ export default function MapView() {
 
     return () => {
       unsubFlights();
-      unsubFilters();
       cancelAnimationFrame(frameRaf);
       hideTip();
       mapRef.current = null;

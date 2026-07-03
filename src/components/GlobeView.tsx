@@ -43,8 +43,12 @@ const TRAIL_STEPS_SEL = 32; // higher resolution for the selected flight
 const REMAIN_STEPS = 24; // remaining-route samples (selected flight only)
 const BANK_RAD = 0.45; // bank angle while circling (hold / LAN orbit)
 // LOD: beyond this camera distance from the globe center (radius 100), planes
-// render as dots instead of detailed silhouettes. ~altitude 1.8 in globe units.
-const LOD_FAR_DIST = 280;
+// render as dots instead of detailed silhouettes. Above react-globe.gl's
+// untouched default camera (altitude 2.5 ≈ 350) so silhouettes show even
+// before the home airport arrives; dots only when the user zooms well out.
+const LOD_FAR_DIST = 360;
+// Default camera altitude — close enough that planes read as silhouettes.
+const DEFAULT_ALT = 1.7;
 
 // Trail entry: a flight, or the selected flight's remaining (estimated) route.
 type TrailDatum = Flight & { __remaining?: boolean };
@@ -97,6 +101,12 @@ export default function GlobeView() {
   const renderedRef = useRef<Flight[]>([]);
   // Camera-far flag (LOD), computed once per frame by the rAF ticker.
   const farRef = useRef(false);
+  // Home-centering state: on a fresh restart with the 3D view persisted, the
+  // globe mounts before the server's init delivers homeAirports, so the ready
+  // handler can't center on home. These let the effect below re-point exactly
+  // once when home arrives — unless the user has already moved the camera.
+  const userMovedRef = useRef(false);
+  const homePointedRef = useRef(false);
 
   const [size, setSize] = useState({ w: window.innerWidth, h: window.innerHeight });
   useEffect(() => {
@@ -148,6 +158,17 @@ export default function GlobeView() {
     if (c) c.autoRotate = !selectedId && !reducedMotion();
   }, [selectedId]);
 
+  // Center on the home airport when it arrives after mount (fresh restart with
+  // the 3D view persisted) — once, and never over a user-moved camera.
+  useEffect(() => {
+    if (homePointedRef.current || userMovedRef.current) return;
+    const g = globe.current;
+    const primary = homeAirports.find((a) => a.id === 'primary') ?? homeAirports[0];
+    if (!g || !primary) return;
+    homePointedRef.current = true;
+    g.pointOfView({ lat: primary.lat, lng: primary.lng, altitude: DEFAULT_ALT }, 600);
+  }, [homeAirports]);
+
   // Plane meshes update every frame (cheap). Trails + dots are throttled to
   // ~11fps via state so their geometry doesn't rebuild 60×/sec.
   const { mainQueue, dnsQueue } = useMemo(
@@ -162,25 +183,37 @@ export default function GlobeView() {
   const [trailData, setTrailData] = useState<TrailDatum[]>([]);
   const [destData, setDestData] = useState<DestDot[]>([]);
   useEffect(() => {
+    // Signature of everything trailData/destData depend on. When it hasn't
+    // changed since the last tick (all flights idle: taxi/hold/landed), skip
+    // the state pushes so react-globe.gl doesn't re-tessellate the paths.
+    let lastSig = '';
     const tick = () => {
+      if (document.hidden) return; // hidden tab: skip work, resume on visibility
       const { flights: fl, selectedFlightId } = useFlightsStore.getState();
       const ft = useFiltersStore.getState();
       const q = getRenderQueueMemo(fl, ft);
       const set = [...q.mainQueue, ...q.dnsQueue];
-      const trails: TrailDatum[] = set.filter(
-        (f) => !f.isLan && (f.phase === 'cruise' || f.phase === 'hold' || f.phase === 'descent'),
-      );
-      // Selected flight: append its remaining route as a dotted path entry.
-      const sel = selectedFlightId ? trails.find((f) => f.id === selectedFlightId) : undefined;
-      if (sel && liveProgress(sel) < 1) trails.push({ ...sel, __remaining: true });
-      setTrailData(trails);
-      const m = new Map<string, DestDot>();
+      let sig = `${selectedFlightId ?? ''}|${ft.trailStyle}`;
       for (const f of set) {
-        const e = m.get(f.country);
-        if (e) e.count++;
-        else m.set(f.country, { country: f.country, lat: f.dstLat, lng: f.dstLng, count: 1 });
+        sig += `|${f.id},${f.phase},${liveProgress(f).toFixed(3)},${f.liveryColor},${f.isLan ? 1 : 0},${f.country}`;
       }
-      setDestData([...m.values()]);
+      if (sig !== lastSig) {
+        lastSig = sig;
+        const trails: TrailDatum[] = set.filter(
+          (f) => !f.isLan && (f.phase === 'cruise' || f.phase === 'hold' || f.phase === 'descent'),
+        );
+        // Selected flight: append its remaining route as a dotted path entry.
+        const sel = selectedFlightId ? trails.find((f) => f.id === selectedFlightId) : undefined;
+        if (sel && liveProgress(sel) < 1) trails.push({ ...sel, __remaining: true });
+        setTrailData(trails);
+        const m = new Map<string, DestDot>();
+        for (const f of set) {
+          const e = m.get(f.country);
+          if (e) e.count++;
+          else m.set(f.country, { country: f.country, lat: f.dstLat, lng: f.dstLng, count: 1 });
+        }
+        setDestData([...m.values()]);
+      }
       disposeUnusedMaterials(new Set(fl.map((f) => f.liveryColor)));
       // Drop mesh-registry entries for flights three-globe has removed from the
       // custom layer (it disposes the Object3D; we just release our reference).
@@ -377,18 +410,39 @@ export default function GlobeView() {
   }, [updateMesh]);
 
   // Nearest rendered flight within `radiusPx` of a screen point, by projecting
-  // each flight's arc position (same approach as the tooltip — no raycasting,
-  // and a generous FR24-style hit radius since the planes are small).
+  // each flight's ACTUAL rendered position (same placement math as updateMesh:
+  // arc altitude + lifecycle orbit offsets). Projecting at ground level made
+  // high-altitude cruise planes and orbiting hold/LAN planes unclickable.
   const findFlightAt = useCallback(
     (x: number, y: number, radiusPx: number): Flight | null => {
       const g = globe.current as unknown as GlobeApi | null;
       if (!g) return null;
+      const now = performance.now();
+      const cp = g.camera().position;
+      const camDist2 = cp.x * cp.x + cp.y * cp.y + cp.z * cp.z;
       let best: Flight | null = null;
       let bestD = radiusPx * radiusPx;
       for (const f of renderedRef.current) {
-        const ep = flightEndpoints(homeById(f.homeAirportId), f);
-        const p = interpolateArc(ep.startLat, ep.startLng, ep.endLat, ep.endLng, liveProgress(f));
-        const sc = g.getScreenCoords(p.lat, p.lng, 0.02);
+        const home = homeById(f.homeAirportId);
+        const ep = flightEndpoints(home, f);
+        const progress = liveProgress(f);
+        const p =
+          f.isLan && home
+            ? { lat: home.lat, lng: home.lng }
+            : interpolateArc(ep.startLat, ep.startLng, ep.endLat, ep.endLng, progress);
+        const km = f.isLan ? 0 : greatCircleKm(ep.startLat, ep.startLng, ep.endLat, ep.endLng);
+        const alt = f.isLan ? 0.03 : arcAltitude(km) * Math.sin(progress * Math.PI) + 0.006;
+        const pose = lifecyclePose(f, now);
+        const lat = p.lat + pose.dLat;
+        const lng = p.lng + correctedLngOffset(pose.dLng, p.lat);
+        // Skip planes on the far side of the globe — they project to valid
+        // screen coords but are hidden behind the sphere.
+        const c = g.getCoords(lat, lng, alt);
+        const dxc = c.x - cp.x;
+        const dyc = c.y - cp.y;
+        const dzc = c.z - cp.z;
+        if (dxc * dxc + dyc * dyc + dzc * dzc > camDist2) continue;
+        const sc = g.getScreenCoords(lat, lng, alt);
         const dx = sc.x - x;
         const dy = sc.y - y;
         const dd = dx * dx + dy * dy;
@@ -410,7 +464,7 @@ export default function GlobeView() {
       const now = performance.now();
       if (now - lastTip.current < 33) return;
       lastTip.current = now;
-      const best = findFlightAt(e.clientX, e.clientY, 12);
+      const best = findFlightAt(e.clientX, e.clientY, 14);
       if (containerRef.current) containerRef.current.style.cursor = best ? 'pointer' : '';
       if (best) showTip(e.clientX, e.clientY, flightTipText(best));
       else hideTip();
@@ -429,7 +483,7 @@ export default function GlobeView() {
       const d = downPos.current;
       downPos.current = null;
       if (!d || Math.hypot(e.clientX - d.x, e.clientY - d.y) > 5) return; // drag, not a click
-      const f = findFlightAt(e.clientX, e.clientY, 14);
+      const f = findFlightAt(e.clientX, e.clientY, 18);
       useFlightsStore.getState().selectFlight(f ? f.id : null);
     },
     [findFlightAt],
@@ -470,15 +524,22 @@ export default function GlobeView() {
           dir.position.set(1, 1, 1);
           scene.add(dir);
           const primary = homeRef.current.find((a) => a.id === 'primary') ?? homeRef.current[0];
-          if (primary) g.pointOfView({ lat: primary.lat, lng: primary.lng, altitude: 2.3 }, 0);
+          // Always set the plane-visible default altitude — home may not have
+          // arrived yet; the homeAirports effect re-centers when it does.
+          g.pointOfView(
+            { lat: primary?.lat ?? 30, lng: primary?.lng ?? 15, altitude: DEFAULT_ALT },
+            0,
+          );
+          if (primary) homePointedRef.current = true;
           const c = g.controls() as {
             autoRotate: boolean;
             autoRotateSpeed: number;
             addEventListener: (e: string, cb: () => void) => void;
           };
           c.autoRotate = !reducedMotion();
-          c.autoRotateSpeed = 0.35;
+          c.autoRotateSpeed = 0.15;
           c.addEventListener('start', () => {
+            userMovedRef.current = true;
             c.autoRotate = false;
             clearTimeout(idleTimer.current);
           });

@@ -45,6 +45,7 @@ const DOH_HOSTS = new Set([
 
 interface Flow {
   flight: Flight;
+  storageKey: string; // current key in `flows` (kept in sync on rekey)
   opened: boolean;
   createdAt: number;
   launchAt: number; // end of taxi / when opened
@@ -54,10 +55,12 @@ interface Flow {
   finRst: boolean;
   hostnameResolved: boolean;
   processResolved: boolean;
+  missNoted: boolean; // onProcessMiss already fired for this flow
   lastEmittedBytes: number;
   lastEmittedBps: number;
   lastEmitAt: number;
-  bps: { t: number; bytes: number }[]; // rolling 3s window
+  bpsBuckets: number[]; // rolling 3s window — ring of TICK_MS byte buckets
+  bpsBucket: number; // absolute index of the newest bucket (floor(t / TICK_MS))
 }
 
 export interface FlowTrackerOpts {
@@ -74,8 +77,17 @@ export interface FlowTrackerOpts {
 // socket by now (retention window passed), it never will.
 const PROCESS_MISS_WINDOW_MS = 5000;
 
+// Throughput ring: 12 × TICK_MS (250ms) byte buckets = a rolling 3s window,
+// O(1) per packet instead of one array entry per packet.
+const BPS_BUCKET_COUNT = 12;
+const BPS_WINDOW_S = (BPS_BUCKET_COUNT * TICK_MS) / 1000;
+
 export class FlowTracker {
   private flows = new Map<string, Flow>();
+  // Secondary indexes so findFlow() is O(1) instead of scanning every flow per
+  // packet. Only open flows live here — closed flows are unindexed in close().
+  private byTuple = new Map<string, Flow>(); // literal 5-tuple of flow.flight
+  private byHost = new Map<string, Flow>(); // host-form storage key (flowKey with host)
   private timer: ReturnType<typeof setInterval>;
 
   constructor(private opts: FlowTrackerOpts) {
@@ -101,6 +113,24 @@ export class FlowTracker {
     return `${localIp}:${localPort}>${remoteId}:${remotePort}:${proto}`;
   }
 
+  /** Literal 5-tuple of a flow's flight (local → remote) — byTuple index key. */
+  private tupleKey(f: Flight): string {
+    return `${f.srcIp}:${f.srcPort}>${f.dstIp}:${f.dstPort}:${f.protocol}`;
+  }
+
+  /** Register a flow in the secondary indexes under its storage key. */
+  private indexFlow(flow: Flow, storageKey: string): void {
+    this.byTuple.set(this.tupleKey(flow.flight), flow);
+    if (storageKey.includes('>host:')) this.byHost.set(storageKey, flow);
+  }
+
+  /** Drop a flow from the secondary indexes (idempotent; never evicts another flow). */
+  private unindexFlow(flow: Flow): void {
+    const tk = this.tupleKey(flow.flight);
+    if (this.byTuple.get(tk) === flow) this.byTuple.delete(tk);
+    if (this.byHost.get(flow.storageKey) === flow) this.byHost.delete(flow.storageKey);
+  }
+
   private findFlow(
     localIp: string,
     localPort: number,
@@ -110,18 +140,8 @@ export class FlowTracker {
     host?: string,
   ): { key: string; flow: Flow | undefined } {
     // Literal 5-tuple wins — FIN/RST and data packets without SNI must stay on-session.
-    for (const [k, f] of this.flows) {
-      if (f.closedAt) continue;
-      if (
-        f.flight.srcIp === localIp &&
-        f.flight.srcPort === localPort &&
-        f.flight.dstIp === remoteIp &&
-        f.flight.dstPort === remotePort &&
-        f.flight.protocol === proto
-      ) {
-        return { key: k, flow: f };
-      }
-    }
+    const literal = this.byTuple.get(`${localIp}:${localPort}>${remoteIp}:${remotePort}:${proto}`);
+    if (literal) return { key: literal.storageKey, flow: literal };
 
     const key = this.flowKey(localIp, localPort, remoteIp, remotePort, proto, host);
     const direct = this.flows.get(key);
@@ -129,18 +149,8 @@ export class FlowTracker {
 
     const h = canonicalHost(host, remoteIp);
     if (h) {
-      for (const [k, f] of this.flows) {
-        if (f.closedAt) continue;
-        const fh = canonicalHost(f.flight.sni || f.flight.hostname, f.flight.dstIp);
-        if (
-          fh === h &&
-          f.flight.srcIp === localIp &&
-          f.flight.dstPort === remotePort &&
-          f.flight.protocol === proto
-        ) {
-          return { key: k, flow: f };
-        }
-      }
+      const byHost = this.byHost.get(`${localIp}>host:${h}:${remotePort}:${proto}`);
+      if (byHost) return { key: byHost.storageKey, flow: byHost };
     }
     return { key, flow: undefined };
   }
@@ -154,7 +164,11 @@ export class FlowTracker {
     k.packetsTotal += a.packetsTotal;
     if (a.isIPv6) k.isIPv6 = true;
     keep.lastPacketAt = Math.max(keep.lastPacketAt, absorb.lastPacketAt);
-    keep.bps.push(...absorb.bps);
+    // Merge throughput rings — align both to the current bucket, then add.
+    const now = Date.now();
+    this.advanceBpsRing(keep, now);
+    this.advanceBpsRing(absorb, now);
+    for (let i = 0; i < BPS_BUCKET_COUNT; i++) keep.bpsBuckets[i] += absorb.bpsBuckets[i];
     if (absorb.hostnameResolved && !keep.hostnameResolved) {
       keep.flight.hostname = a.hostname;
       keep.flight.sni = a.sni;
@@ -169,6 +183,9 @@ export class FlowTracker {
       keep.processResolved = true;
     }
     this.flows.delete(absorbKey);
+    // The absorbed tuple is NOT repointed to the keeper — a later packet on
+    // that tuple starts a fresh flow, exactly as with the old linear scan.
+    this.unindexFlow(absorb);
     if (absorb.opened) {
       this.opts.onEvent({
         event: 'closed',
@@ -207,11 +224,17 @@ export class FlowTracker {
     }
 
     this.flows.delete(key);
+    if (this.byHost.get(key) === flow) this.byHost.delete(key);
     this.flows.set(newKey, flow);
+    flow.storageKey = newKey;
+    this.byHost.set(newKey, flow); // newKey is always host-form here (h is set)
+    // byTuple entry is untouched — the flight's literal tuple didn't change.
   }
 
   clear(): void {
     this.flows.clear();
+    this.byTuple.clear();
+    this.byHost.clear();
     resetCallsigns();
   }
 
@@ -246,6 +269,7 @@ export class FlowTracker {
     if (!flow) {
       flow = this.create(p, localIp, localPort, remoteIp, remotePort, now, key);
       this.flows.set(key, flow);
+      this.indexFlow(flow, key);
     }
     if (flow.closedAt) return; // ignore packets after close
 
@@ -256,7 +280,8 @@ export class FlowTracker {
     f.bytesTotal = f.bytesTx + f.bytesRx;
     f.packetsTotal++;
     flow.lastPacketAt = now;
-    flow.bps.push({ t: now, bytes: p.length });
+    this.advanceBpsRing(flow, now);
+    flow.bpsBuckets[flow.bpsBucket % BPS_BUCKET_COUNT] += p.length;
     if (p.tcpFin || p.tcpRst) flow.finRst = true;
     if (p.host && !flow.hostnameResolved) {
       f.hostname = p.host;
@@ -379,6 +404,7 @@ export class FlowTracker {
 
     const flow: Flow = {
       flight,
+      storageKey: flowKey,
       opened: false,
       createdAt: now,
       launchAt: now,
@@ -386,13 +412,25 @@ export class FlowTracker {
       finRst: false,
       hostnameResolved: false,
       processResolved: false,
+      missNoted: false,
       lastEmittedBytes: -1,
       lastEmittedBps: -1,
       lastEmitAt: 0,
-      bps: [],
+      bpsBuckets: new Array<number>(BPS_BUCKET_COUNT).fill(0),
+      bpsBucket: Math.floor(now / TICK_MS),
     };
     this.resolveProcess(flow);
     return flow;
+  }
+
+  // Advance a flow's throughput ring to the bucket containing `now`, zeroing
+  // any skipped slots (capped at one full revolution). O(1), no allocation.
+  private advanceBpsRing(flow: Flow, now: number): void {
+    const bucket = Math.floor(now / TICK_MS);
+    if (bucket <= flow.bpsBucket) return;
+    const steps = Math.min(bucket - flow.bpsBucket, BPS_BUCKET_COUNT);
+    for (let i = 1; i <= steps; i++) flow.bpsBuckets[(flow.bpsBucket + i) % BPS_BUCKET_COUNT] = 0;
+    flow.bpsBucket = bucket;
   }
 
   private resolveHome(localIp: string): HomeAirport | undefined {
@@ -407,8 +445,12 @@ export class FlowTracker {
     if (flow.processResolved) return false;
     const proc = lookupProcess(flow.flight.srcPort, flow.flight.protocol);
     if (!proc) {
-      // Young flow with no attribution → boost the lsof cadence.
-      if (Date.now() - flow.createdAt < PROCESS_MISS_WINDOW_MS) this.opts.onProcessMiss?.();
+      // Young flow with no attribution → boost the lsof cadence. First miss
+      // only — re-noting on every tick kept the boost window refreshed forever.
+      if (!flow.missNoted && Date.now() - flow.createdAt < PROCESS_MISS_WINDOW_MS) {
+        flow.missNoted = true;
+        this.opts.onProcessMiss?.();
+      }
       return false;
     }
     const f = flow.flight;
@@ -450,7 +492,10 @@ export class FlowTracker {
 
       // closed flows: clean up after TTL
       if (flow.closedAt) {
-        if (now - flow.closedAt > CLOSED_TTL_MS) this.flows.delete(key);
+        if (now - flow.closedAt > CLOSED_TTL_MS) {
+          this.unindexFlow(flow); // no-op (unindexed at close) — kept for safety
+          this.flows.delete(key);
+        }
         continue;
       }
 
@@ -480,8 +525,10 @@ export class FlowTracker {
       }
 
       // rolling 3s throughput
-      flow.bps = flow.bps.filter((b) => now - b.t <= 3000);
-      f.bytesPerSec = Math.round(flow.bps.reduce((s, b) => s + b.bytes, 0) / 3);
+      this.advanceBpsRing(flow, now);
+      let windowBytes = 0;
+      for (const b of flow.bpsBuckets) windowBytes += b;
+      f.bytesPerSec = Math.round(windowBytes / BPS_WINDOW_S);
       f.durationMs = now - flow.launchAt;
 
       // late aircraft upgrade (cargo / satellite emerge with volume + time)
@@ -534,6 +581,7 @@ export class FlowTracker {
   private close(flow: Flow): void {
     const f = flow.flight;
     flow.closedAt = Date.now();
+    this.unindexFlow(flow); // closed flows must never be served by the indexes
     f.phase = 'landed';
     this.opts.onEvent({
       event: 'closed',
