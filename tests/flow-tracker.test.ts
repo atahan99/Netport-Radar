@@ -273,6 +273,17 @@ describe('process attribution boost (adaptive lsof cadence)', () => {
     tracker.stop();
   });
 
+  it('signals only once per flow — each new flow notes its own first miss', async () => {
+    const misses = vi.fn();
+    const { tracker } = setup({ onProcessMiss: misses });
+    tracker.ingest(pkt({ host: 'x.com' }));
+    await vi.advanceTimersByTimeAsync(2000); // many ticks inside the miss window
+    expect(misses).toHaveBeenCalledTimes(1);
+    tracker.ingest(pkt({ srcPort: 51111, host: 'y.com' })); // second flow → its own first miss
+    expect(misses).toHaveBeenCalledTimes(2);
+    tracker.stop();
+  });
+
   it('stops signaling once the flow is past the miss window', async () => {
     const misses = vi.fn();
     const { tracker } = setup({ onProcessMiss: misses });
@@ -291,6 +302,118 @@ describe('process attribution boost (adaptive lsof cadence)', () => {
     tracker.ingest(pkt({ host: 'x.com' }));
     await vi.advanceTimersByTimeAsync(1000);
     expect(misses).not.toHaveBeenCalled();
+    tracker.stop();
+  });
+});
+
+describe('flow lookup (indexed findFlow)', () => {
+  it('routes a hostless packet on the same literal 5-tuple to the host-keyed flow', async () => {
+    const { events, tracker } = setup();
+    tracker.ingest(pkt({ host: 'x.com', length: 100 })); // stored under its host key
+    tracker.ingest(pkt({ length: 200 })); // same 5-tuple, no SNI → literal-tuple hit
+    await vi.advanceTimersByTimeAsync(300);
+    const opens = events.filter((e) => e.event === 'opened');
+    expect(opens).toHaveLength(1);
+    expect(opens[0].flight.bytesTotal).toBe(300);
+    tracker.stop();
+  });
+
+  it('merges connections on different local ports to the same SNI into one flight', async () => {
+    const { events, tracker } = setup();
+    tracker.ingest(pkt({ srcPort: 50000, host: 'cdn.example.com', length: 100 }));
+    tracker.ingest(pkt({ srcPort: 50001, host: 'cdn.example.com', length: 150 }));
+    await vi.advanceTimersByTimeAsync(300);
+    const opens = events.filter((e) => e.event === 'opened');
+    expect(opens).toHaveLength(1);
+    expect(opens[0].flight.bytesTotal).toBe(250);
+    tracker.stop();
+  });
+
+  it('absorbFlow removes the absorbed flow and merges its bytes into the keeper', async () => {
+    const { events, tracker } = setup();
+    tracker.ingest(pkt({ srcPort: 50000, dstIp: '1.1.1.1', host: 'x.com', length: 100 })); // keeper
+    tracker.ingest(pkt({ srcPort: 50001, dstIp: '5.6.7.8', length: 200 })); // literal-keyed, no SNI
+    await vi.advanceTimersByTimeAsync(2100); // both open (DNS hold passes for the second)
+    const opens = events.filter((e) => e.event === 'opened');
+    expect(opens).toHaveLength(2);
+    const keeperId = opens[0].flight.id;
+    const absorbedId = opens[1].flight.id;
+
+    // SNI finally shows up on the second tuple → rekey collides → absorbed into keeper
+    tracker.ingest(pkt({ srcPort: 50001, dstIp: '5.6.7.8', host: 'x.com', length: 50 }));
+    const closed = events.filter((e) => e.event === 'closed');
+    expect(closed).toHaveLength(1);
+    expect(closed[0].id).toBe(absorbedId);
+
+    await vi.advanceTimersByTimeAsync(1300); // let a metric patch flush
+    const metric = events.filter(
+      (e): e is Extract<FlightEvent, { event: 'updated' }> =>
+        e.event === 'updated' && 'bytesTotal' in e.patch,
+    );
+    expect(metric.filter((e) => e.id === keeperId).at(-1)?.patch.bytesTotal).toBe(350);
+
+    // the absorbed tuple is NOT repointed to the keeper — a new packet there starts a fresh flow
+    tracker.ingest(pkt({ srcPort: 50001, dstIp: '5.6.7.8', length: 10 }));
+    await vi.advanceTimersByTimeAsync(2100);
+    expect(events.filter((e) => e.event === 'opened')).toHaveLength(3);
+    tracker.stop();
+  });
+
+  it('tryRekeyByHostname moves a flow to its host key so later connections merge', async () => {
+    const { events, tracker } = setup();
+    tracker.ingest(pkt({ srcPort: 50000, length: 100 })); // no SNI → literal key
+    await vi.advanceTimersByTimeAsync(2100); // opened
+    tracker.ingest(pkt({ srcPort: 50000, host: 'x.com', length: 50 })); // SNI arrives → rekeyed
+    tracker.ingest(pkt({ srcPort: 50002, host: 'x.com', length: 25 })); // new port, same host → merges
+    await vi.advanceTimersByTimeAsync(1300);
+    expect(events.filter((e) => e.event === 'opened')).toHaveLength(1);
+    const metric = events.filter(
+      (e): e is Extract<FlightEvent, { event: 'updated' }> =>
+        e.event === 'updated' && 'bytesTotal' in e.patch,
+    );
+    expect(metric.at(-1)?.patch.bytesTotal).toBe(175);
+    tracker.stop();
+  });
+
+  it('closed flows do not receive new packets and do not reopen', async () => {
+    const { events, tracker } = setup();
+    tracker.ingest(pkt({ host: 'x.com', length: 100 }));
+    await vi.advanceTimersByTimeAsync(300); // opened
+    tracker.ingest(pkt({ tcpFin: true, length: 0 }));
+    await vi.advanceTimersByTimeAsync(2600); // descent → closed
+    expect(events.some((e) => e.event === 'closed')).toBe(true);
+
+    const before = events.length;
+    tracker.ingest(pkt({ host: 'x.com', length: 500 })); // still in the map, but closed → ignored
+    await vi.advanceTimersByTimeAsync(1300);
+    expect(events.filter((e) => e.event === 'opened')).toHaveLength(1);
+    expect(events.slice(before).filter((e) => e.event === 'updated')).toHaveLength(0);
+    tracker.stop();
+  });
+});
+
+describe('throughput ring (bytesPerSec)', () => {
+  it('computes bytesPerSec from the rolling 3s window and decays to 0 when idle', async () => {
+    const { events, tracker } = setup();
+    tracker.ingest(pkt({ host: 'x.com', length: 1000 }));
+    await vi.advanceTimersByTimeAsync(300); // opened
+    // steady drip: 1000 bytes every 250ms for ~4s (17KB total)
+    for (let i = 0; i < 16; i++) {
+      tracker.ingest(pkt({ host: 'x.com', length: 1000 }));
+      await vi.advanceTimersByTimeAsync(250);
+    }
+    const metric = () =>
+      events.filter(
+        (e): e is Extract<FlightEvent, { event: 'updated' }> =>
+          e.event === 'updated' && typeof e.patch.bytesPerSec === 'number',
+      );
+    // window holds ~12 buckets × 1000B → ~4000 B/s, never the cumulative total
+    const steady = metric().at(-1)!.patch.bytesPerSec!;
+    expect(steady).toBeGreaterThanOrEqual(3000);
+    expect(steady).toBeLessThanOrEqual(4100);
+
+    await vi.advanceTimersByTimeAsync(4000); // idle > 3s window → ring zeroes out
+    expect(metric().at(-1)!.patch.bytesPerSec).toBe(0);
     tracker.stop();
   });
 });

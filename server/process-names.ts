@@ -5,7 +5,7 @@
 // Rows linger PROCESS_RETAIN_MS after the socket closes so sub-2s flows still attribute.
 
 
-import { execSync } from 'child_process';
+import { execFile } from 'child_process';
 import { normalizeProcess } from '../src/lib/livery';
 import {
   PROCESS_POLL_MS,
@@ -31,25 +31,39 @@ let lastPollAt = 0;
 // for a short window so fresh connections get their process/livery fast.
 let boostUntil = 0;
 
-function runLsof(): string {
-  try {
-    return execSync('lsof -i -nP +c0 -FpcPn', {
-      encoding: 'utf8',
-      maxBuffer: 16 * 1024 * 1024,
-      stdio: ['ignore', 'pipe', 'ignore'],
-    });
-  } catch (e) {
-    // lsof often exits non-zero (unreadable handles) but still prints stdout.
-    const so = (e as { stdout?: string | Buffer }).stdout;
-    return typeof so === 'string' ? so : so ? so.toString() : '';
-  }
+function runLsof(): Promise<string> {
+  return new Promise((resolve) => {
+    execFile(
+      'lsof',
+      ['-i', '-nP', '+c0', '-FpcPn'],
+      { encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 },
+      (error, stdout) => {
+        if (!error) {
+          resolve(stdout);
+          return;
+        }
+        // lsof often exits non-zero (unreadable handles) but still prints stdout.
+        const so = (error as { stdout?: string | Buffer }).stdout ?? stdout;
+        resolve(typeof so === 'string' ? so : so ? so.toString() : '');
+      },
+    );
+  });
 }
 
-function poll(): void {
-  lastPollAt = Date.now();
-  const out = runLsof();
-  if (!out) return;
+let pollInFlight = false;
 
+function poll(): void {
+  if (pollInFlight) return;
+  pollInFlight = true;
+  lastPollAt = Date.now();
+  void runLsof().then((out) => {
+    pollInFlight = false;
+    if (!out) return;
+    applyLsofOutput(out);
+  });
+}
+
+function applyLsofOutput(out: string): void {
   const next = new Map<string, ProcEntry>();
   let pid = 0;
   let command = '';
@@ -91,6 +105,7 @@ function poll(): void {
 }
 
 function scheduleNext(): void {
+  if (!polling) return;
   const interval = Date.now() < boostUntil ? PROCESS_POLL_BOOST_MS : PROCESS_POLL_MS;
   timer = setTimeout(() => {
     poll();
