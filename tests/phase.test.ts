@@ -33,3 +33,13 @@ describe('progressCaption', () => {
     expect(progressCaption('hold', 'outbound')).toBe('Holding');
   });
 });
+
+describe('dpiLabel', () => {
+  it('names the inspection mode, with a caller-chosen placeholder', async () => {
+    const { dpiLabel } = await import('../src/lib/format');
+    expect(dpiLabel(null, true, '…')).toBe('demo');
+    expect(dpiLabel(null, false, '—')).toBe('—');
+    expect(dpiLabel({ dpiMode: 'full' }, false, '…')).toBe('tshark');
+    expect(dpiLabel({ dpiMode: 'port-based' }, false, '…')).toBe('port-based');
+  });
+});

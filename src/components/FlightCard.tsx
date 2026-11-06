@@ -5,15 +5,14 @@ import { useFiltersStore } from '@/store/filters';
 import { useBackendStore } from '@/store/backend';
 import { mapRef, globeRef, flightCardRef } from '@/lib/view-refs';
 import { flightWorldPos } from '@/lib/flight-pos';
+import { horizonMargin } from '@/lib/globe-horizon';
 import { liveProgress } from '@/lib/anim';
 import { protocolBadgeClass, PROTOCOL_LABELS } from '@/lib/classify';
 import { PHASE_META, progressCaption } from '@/lib/phase';
-import { fmtBytes, fmtRate, fmtDur } from '@/lib/format';
+import { fmtBytes, fmtRate, fmtDur, dpiLabel } from '@/lib/format';
 import { cn } from '@/lib/utils';
 import { geoPlaceLabel } from '@/lib/geo-display';
 import type { Flight, HomeAirport } from '@/types';
-
-const GLOBE_R = 100;
 
 // Width leaves room for the board beside it in the bottom row:
 // 360px board + 2×16px padding + 8px gap + 8px slack (300px board below 900px).
@@ -37,16 +36,8 @@ function anchoredPos(f: Flight, home: HomeAirport | undefined, is2d: boolean): S
   const g = globeRef.current;
   if (!g) return null;
   const sc = g.getScreenCoords(p.lat, p.lng, p.alt);
-  let opacity = 1;
-  try {
-    const P = g.getCoords(p.lat, p.lng, 0);
-    const C = g.camera().position;
-    const margin = P.x * C.x + P.y * C.y + P.z * C.z - GLOBE_R * GLOBE_R;
-    const band = GLOBE_R * GLOBE_R * 0.05;
-    opacity = Math.max(0, Math.min(1, margin / band));
-  } catch {
-    /* keep visible */
-  }
+  // Fade out over a thin band as the plane slips behind the globe.
+  const opacity = Math.max(0, Math.min(1, horizonMargin(g, p.lat, p.lng) / 0.05));
   return { x: sc.x, y: sc.y, opacity };
 }
 
@@ -169,14 +160,7 @@ export default function FlightCard() {
   const mode = useFiltersStore((s) => (s.viewMode === '2d' ? s.cardAnchor2d : s.cardAnchor3d));
   const toggleCardAnchor = useFiltersStore((s) => s.toggleCardAnchor);
   const backend = useBackendStore((s) => s.backend);
-  const dpi =
-    import.meta.env.VITE_DEMO === '1'
-      ? 'demo'
-      : backend
-        ? backend.dpiMode === 'full'
-          ? 'tshark'
-          : 'port-based'
-        : '—';
+  const dpi = dpiLabel(backend, import.meta.env.VITE_DEMO === '1', '—');
 
   const cardRef = useRef<HTMLDivElement>(null);
 

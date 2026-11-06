@@ -11,7 +11,7 @@ import { useBackendStore } from '@/store/backend';
 import * as Dialog from '@radix-ui/react-dialog';
 import { Button } from '@/components/ui/button';
 import { liveControl } from '@/lib/live';
-import { fmtRate } from '@/lib/format';
+import { fmtRate, dpiLabel } from '@/lib/format';
 import { exportDiagnostics, useDiagnosticsStore } from '@/store/diagnostics';
 import {
   Select,
@@ -136,7 +136,7 @@ export default function MetricsStrip() {
   const hasActiveFilters = useFiltersStore((s) => filterChips(s).length > 0);
   const backend = useBackendStore((s) => s.backend);
   const demo = import.meta.env.VITE_DEMO === '1';
-  const dpi = demo ? 'demo' : backend ? (backend.dpiMode === 'full' ? 'tshark' : 'port-based') : '…';
+  const dpi = dpiLabel(backend, demo, '…');
   const iface = demo ? 'demo' : backend?.iface ?? '…';
   const online = useBackendStore((s) => s.online);
   const diagEntries = useDiagnosticsStore((s) => s.entries.length);

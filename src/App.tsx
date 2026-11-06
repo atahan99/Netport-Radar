@@ -59,6 +59,12 @@ function cycleFlight(dir: 1 | -1): void {
   );
 }
 
+// Keyboard shortcuts stay out of the way while the user types (app search).
+function isTyping(): boolean {
+  const el = document.activeElement as HTMLElement | null;
+  return !!el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable);
+}
+
 export default function App() {
   const viewMode = useFiltersStore((s) => s.viewMode);
   // Live capture by default; demo generator behind VITE_DEMO=1 for offline UI work.
@@ -87,10 +93,7 @@ export default function App() {
       }
       // Single-key shortcuts: F filters, L legend, G 2D/3D. Never while typing
       // or with a modifier held (Shift+F is the dev FPS overlay).
-      const typing = (() => {
-        const el = document.activeElement as HTMLElement | null;
-        return !!el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable);
-      })();
+      const typing = isTyping();
       if (!typing && !e.metaKey && !e.ctrlKey && !e.altKey && !e.shiftKey) {
         const f = useFiltersStore.getState();
         const k = e.key.toLowerCase();
@@ -101,10 +104,7 @@ export default function App() {
       // [ / ] step backward / forward through the on-screen flights — keyboard
       // access to planes (the canvas markers aren't individually focusable).
       if (e.key === '[' || e.key === ']') {
-        const el = document.activeElement as HTMLElement | null;
-        if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)) {
-          return; // don't hijack typing in the app-search field
-        }
+        if (typing) return; // don't hijack typing in the app-search field
         e.preventDefault();
         cycleFlight(e.key === ']' ? 1 : -1);
       }
