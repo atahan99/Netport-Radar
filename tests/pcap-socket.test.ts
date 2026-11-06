@@ -49,3 +49,17 @@ describe('startPcapReceiver', () => {
     expect(got).toEqual([]);
   });
 });
+
+describe('startDecoder (tcpdump text over the broker socket)', () => {
+  it('parses lines from a paused stream', async () => {
+    const { PassThrough } = await import('stream');
+    const { startDecoder } = await import('../server/capture');
+    const input = new PassThrough();
+    input.pause();
+    const pkts: unknown[] = [];
+    startDecoder('tcpdump', input, new Set(['10.2.0.2']), (p) => pkts.push(p), () => {});
+    input.write('IP 10.2.0.2.50382 > 160.79.104.10.443: Flags [S], seq 1, win 2048, length 0\n');
+    await new Promise((r) => setTimeout(r, 20));
+    expect(pkts).toHaveLength(1);
+  });
+});

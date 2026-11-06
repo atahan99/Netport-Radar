@@ -128,6 +128,7 @@ function readLines(
       if (pkt) onPacket(pkt);
     }
   });
+  stream.resume(); // the broker's socket arrives paused; a 'data' listener alone won't start it
 }
 
 function watchStderr(proc: ChildProcess, errRe: RegExp, onError: (msg: string) => void): void {
