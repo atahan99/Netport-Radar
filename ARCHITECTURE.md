@@ -1,193 +1,181 @@
-# netport-radar — Architecture
+# netport-radar architecture
 
-Visualization-only local network monitor. Your machine is an airport; every
-connection is a flight on a great-circle arc. **Read-only by design** — the
-capture path never injects, blocks, or modifies traffic.
+netport-radar is a read-only local network monitor: every connection is drawn as
+a flight on a great-circle arc. The capture path never injects, blocks or
+modifies traffic. The security model and threat model are in the
+[README](README.md#security-and-infrastructure-design); this document covers how
+the pieces fit together.
 
-![netport-radar data flow: a packet is captured by the root broker (tshark/tcpdump + lsof), streamed over IPC to the unprivileged server (flow tracker, geo lookup, WS/HTTP), then by WebSocket to the browser, where Zustand stores feed a two-channel renderer driving the 2D map, 3D globe, and HUD.](docs/architecture.svg)
+![Data flow: the root broker captures raw packets and lsof data, streams pcap over a nonce-gated Unix socket to the unprivileged server, which dissects, tracks flows and serves the browser over WebSocket.](docs/architecture.svg)
 
 ## Contents
 
 - [Data flow](#data-flow)
-- [Ownership split](#ownership-split-the-core-contract)
+- [Ownership split](#ownership-split)
 - [Server](#server-server)
+- [Privilege separation](#privilege-separation)
 - [Frontend](#frontend-src)
-- [Security model](#security-model)
 - [Process attribution](#process-attribution)
-- [IPv6 merge status](#ipv6-merge-status)
-- [Livery](#livery)
-- [Load testing & replay](#load-testing--replay)
-- [Client diagnostics](#client-diagnostics)
-- [Testing & conventions](#testing--conventions)
+- [IPv4/IPv6 merging](#ipv4ipv6-merging)
+- [Replay and diagnostics](#replay-and-diagnostics)
+- [Conventions](#conventions)
 
 ## Data flow
 
 ```
-            (root)                                    (browser)
-┌────────────────────────────┐          ┌─────────────────────────────────┐
-│ tshark -T fields  (DPI)    │          │ useLiveFlights (src/lib/live.ts)│
-│   └─ or tcpdump (ports)    │          │   • applies FlightEvents        │
-│        server/capture.ts   │          │   • animates arcProgress (rAF)  │
-│            │ RawPacket     │          │   • Zustand stores              │
-│            ▼               │   WS     │        │                        │
-│ FlowTracker                │  :8090   │        ▼                        │
-│  server/flow-tracker.ts    │ ───────► │ MapView (MapLibre, DOM markers) │
-│  • host//64-merged keys    │  JSON    │ GlobeView (three.js meshes)     │
-│  • phase machine           │ batches  │ Boards / FlightCard / Metrics   │
-│  • bytes, bps, DNS hold    │  /100ms  │                                 │
-│            │ FlightEvent   │          └─────────────────────────────────┘
-│            ▼               │
-│ WsHub (server/ws.ts)       │   also: http :8080 serves dist/ (npm start)
-│ logger.ts (NDJSON, memory) │
-│ process-names.ts (lsof 2s) │
-└────────────────────────────┘
+ root                          your user                         browser
+┌──────────────────────┐      ┌──────────────────────────┐      ┌───────────────────────────┐
+│ priv-broker.ts       │ pcap │ tshark -i -  (dissect)   │      │ live.ts / live-state.ts   │
+│  dumpcap -w -        │─────►│   │ one line per packet  │      │  init snapshot + patches  │
+│  (or tcpdump -Z)     │ unix │   ▼                      │  WS  │  animates arcProgress     │
+│                      │ sock │ FlowTracker              │:8090 │   │                       │
+│  lsof poller ────────┼─IPC─►│  flows, phases, metrics  │─────►│   ▼                       │
+└──────────────────────┘      │   │ FlightEvent          │ JSON │ Zustand stores            │
+                              │   ▼                      │/100ms│ MapView (MapLibre)        │
+                              │ WsHub ── logger (memory) │      │ GlobeView (three.js)      │
+                              │ static server :8080      │      │ boards, card, HUD         │
+                              └──────────────────────────┘      └───────────────────────────┘
 ```
 
-## Ownership split (the core contract)
+Without sudo there is no broker: `tshark` (or `tcpdump`) captures and dissects in
+one process and `lsof` runs inline.
 
-- **Server owns truth**: flow phases (`taxi → cruise → hold → descent →
-  landed`), byte counters, process attribution, hostname/SNI.
-- **Client owns animation**: `arcProgress` (position along the arc) is computed
-  per-frame in the browser from phase + elapsed time. The server never sends
-  positions.
-- Updates ship as **patch events** (`updated` with changed fields), batched every
-  100ms — never full-object rebroadcasts.
+## Ownership split
+
+- The server owns the facts: flow phase (`taxi → cruise → hold → descent →
+  landed`), byte counters, process attribution, hostname and SNI.
+- The client owns animation. `arcProgress`, the position along the arc, is
+  computed every frame from the phase and the time spent in it. The server never
+  sends positions.
+- `init` carries a snapshot of every open flight, and the client rebuilds its
+  list from it on every (re)connect. After that, changes arrive as patch events
+  (`updated` with only the changed fields), batched every 100 ms.
 
 ## Server (`server/`)
 
 | File | Role |
-|---|---|
-| `config.ts` | Ports, bind host, token (all server tunables) |
-| `capture.ts` | Backend detect (tshark → tcpdump → stub), line parsers, geoip, reverse-DNS cache |
-| `flow-tracker.ts` | Packets → flows (hostname//64-merging keys), phase machine, metrics, classification |
-| `process-names.ts` | `lsof -i -nP +c0 -FpcPn` poll (adaptive 0.5–2s) → `proto:port` → owning app + PID |
-| `ws.ts` | WsHub: batching, init/error replay, origin/token gate, control channel |
-| `logger.ts` | In-memory NDJSON session log (capped 200k lines), export/reset |
-| `index.ts` | Entry: preflight, home geolocation, capture supervisor, control handling, dist server |
+| --- | --- |
+| `index.ts` | Entry point: preflight, inline vs brokered capture, control messages, shutdown |
+| `config.ts` | Ports, bind host, token, timing constants |
+| `capture.ts` | Backend detection, raw capture and decoder processes, line parsers, GeoIP, reverse-DNS cache |
+| `capture-supervisor.ts` | Keeps one capture process alive: restart once, declare dead after a second death within 30 s, stop on permission errors |
+| `priv-broker.ts` | Root broker: raw capture, `lsof`, pcap stream to the parent |
+| `pcap-socket.ts` | Parent side of the pcap stream: Unix socket listener with the nonce check |
+| `privdrop.ts` | Drop target from `SUDO_UID`/`SUDO_GID`, `setgid`/`setgroups`/`setuid`, fail-closed check |
+| `home.ts` | Public-IP geolocation for the home airport |
+| `flow-tracker.ts` | Packets to flows (hostname and /64 merging keys), phase machine, metrics, classification, snapshot |
+| `process-names.ts` | `lsof -i -nP +c0 -FpcPn` polling, `proto:port` to process and PID |
+| `ws.ts` | WsHub: batching, init and error replay, origin/token gate, inbound validation |
+| `static.ts` | Static file server for `dist/`, confined to that directory |
+| `logger.ts` | In-memory NDJSON session log (capped at 200k lines) |
 
-**Phase machine:** new 5-tuple → `taxi` (DNS hold ≤2s) → `opened` event → data →
-`cruise` → idle >5s → `hold` → data resumes → `cruise` → FIN/RST → `descent`
-(2s) → `landed` → flow evicted after 30s (client keeps it ~60s for the fade).
-No packets for 120s → force-closed.
+The phase machine: a new 5-tuple starts in `taxi` and waits up to 2 s for DNS,
+then emits `opened`. Data moves it to `cruise`; more than 5 s idle moves it to
+`hold`, and new data back to `cruise`. FIN or RST starts a 2 s `descent`, then
+`landed`, and the server drops the flow 30 s later (the client keeps it about
+60 s for the fade). A flow with no packets for 120 s is closed.
+
+## Privilege separation
+
+When started through sudo on macOS or Linux, `index.ts` does the following while
+it is still root:
+
+1. Creates a `0700` directory, hands it to the invoking user, and listens on a
+   Unix socket inside it.
+2. Forks the broker and sends it `init` (backend, interface, socket path, a
+   random nonce).
+3. Drops to `SUDO_UID`/`SUDO_GID` and exits if that fails or leaves it at uid 0.
+
+For each capture instance the broker starts `dumpcap -w -` (or `tcpdump -Z
+<user>`), connects to the socket, writes the nonce line and pipes the capture
+output after it. The parent checks the nonce and feeds the stream to `tshark -i -`
+running as the user. (`-i -` rather than `-r -`, because tshark refuses to read a
+socket as a file.) macOS libpcap can't read pcap from a pipe, so the tcpdump
+backend uses `-Z` to drop privileges inside tcpdump instead, and its text output
+is parsed directly.
+
+After the drop, the broker treats the parent as untrusted: `init` is accepted
+once, the `-Z` user comes from the broker's own environment, and every interface
+name is checked. The broker exits when the IPC channel closes, so it never
+outlives the server. An interface switch restarts the capture in the broker,
+which opens a new socket connection, and the parent swaps decoders.
 
 ## Frontend (`src/`)
 
 **Stores (Zustand).** `flights` (list, selection, homes), `filters` (protocol
-families, LAN/IPv6, DNS density, direction, search, country isolation, view mode
-— persisted to sessionStorage), `backend`, `connection`, `toasts`, `diagnostics`
-(WS/chunk failures for export).
+families, LAN/IPv6, DNS density, direction, search, country isolation, view and
+theme, persisted to sessionStorage), `backend`, `connection`, `toasts` and
+`diagnostics`.
 
-**Render queue** (`lib/render-queue.ts`). Cap 150 flights + 20 DNS drones. When
-full, bump priority: landed → hold → taxi; `cruise`/`descent` are never bumped.
-Off-screen count shows in the metrics strip.
+**Live client.** `lib/live-state.ts` holds the flight list and applies server
+messages, validating each one first (`parseServerMessage`, `isFlight`, patches
+limited to existing fields). `lib/live.ts` owns the socket, the reconnect logic
+(each handler checks that it still owns the current socket) and the rAF loop that
+animates progress and pushes to the store at 10 Hz.
 
-**Views.** `MapView` (imperative MapLibre DOM markers + GeoJSON overlays) runs
-two cadences: marker positions/poses every other frame with cached element refs
-and change-detected style writes, while the trail/route/dest GeoJSON rebuilds at
-~10Hz (`OVERLAY_MS`) — rebuilding per rAF made MapLibre re-tessellate every
-line each frame. `GlobeView` (lazy-loaded chunk) drives a custom three.js layer:
-merged low-poly aircraft meshes with shared geometry/material caches
-(`lib/globe-meshes.ts`), wingtip strobes, far-zoom LOD dots, banking in hold
-orbits, and projection-based click-to-select (no raycasting — same nearest-
-flight math as the hover tooltip). Both views read `lib/lifecycle.ts` poses
-(taxi spool, hold circle, LAN orbit, eased touchdown). Trails color by livery
-or by an FR24-style altitude ramp (`lib/trail-color.ts`, toggled in Filters);
-the selected flight also gets its remaining route (dotted), a destination
-pin (2D), and a destination ring beacon (3D).
+**Render queue** (`lib/render-queue.ts`). At most 150 flights plus 20 DNS drones.
+When full, landed flights go first, then hold, then taxi; cruise and descent
+are never dropped. Components subscribe only to the filter fields that affect
+the queue, and the memo compares them by value.
 
-**Livery precedence.** Resolved process brand color (`lib/livery.ts`) beats
-hostname-hash color; late process resolution recolors markers + meshes in place.
+**Views.**
+- **Shared position math.** `lib/flight-pos.ts` (`flightWorldPos`) is the one
+  place that computes where a plane is (LAN pinning, lifecycle pose, arc
+  altitude). The 2D markers, 3D meshes, 3D hit-testing, flight card and leader
+  line all use it.
+- **`MapView`** runs two cadences. Marker positions update every other frame
+  with cached elements and change-detected style writes. Trails, routes,
+  destinations and chip placement rebuild at about 10 Hz. Marker DOM is in
+  `lib/map-markers.ts`, layers in `lib/map-layers.ts`, theme paint in
+  `lib/map-theme.ts`, and chip collision culling in `lib/chip-layout.ts`.
+- **`GlobeView`** is lazy-loaded. It draws low-poly aircraft meshes with shared
+  geometry and material caches (`lib/globe-meshes.ts`), strobes, a far-zoom LOD
+  and projection-based click selection. On unmount it releases the WebGL
+  context.
 
-**Theming** (`lib/themes.ts`, 7 themes). The 2D map recolors dark-matter paint by
-layer type (`lib/map-recolor.ts`, applied live via a `[theme]` effect — no reload)
-or swaps base style (Positron/Esri raster). The 3D globe uses the **same palette**:
-`lib/globe-material.ts` builds an unlit material whose fragment shader remaps the
-earth texture's luminance bands (ocean ≈ 0–0.03, land ≈ 0.05–0.13) to the theme's
-water/land colors — Midnight/Arctic use the exact Carto dark-matter/Positron
-values, recolored themes reuse their `mapRecolor` palette, Satellite keeps the
-photo. Natural Earth polygons (`public/geo/`) contribute border strokes only.
-Phase colors live in `lib/phase.ts` (shared by legend/board/card).
+**Theming** (`lib/themes.ts`, seven themes). The 2D map recolors the CARTO
+dark-matter style per layer type, or switches to Positron or Esri imagery. The
+globe uses the same palette: a fragment shader in `lib/globe-material.ts` maps the
+earth texture's luminance bands to the theme's land and water colors.
 
-**Demo mode.** `VITE_DEMO=1` swaps `useLiveFlights` for `lib/demo.ts` (simulated
-flights; hidden keys R = reconnect overlay, B = burst 200).
+**Demo mode.** `VITE_DEMO=1` swaps the live client for `lib/demo.ts`, which
+simulates flights to fixed, plausible locations per host.
 
-**Accessibility.** The canvas is opaque to AT, so `SceneAnnouncer` adds an
-off-screen description + a polite live region for the selected flight; boards are
-`listbox`es with spoken labels; `[`/`]` step through flights (`lib/locate.ts`
-centers the view); `prefers-reduced-motion` is honored.
-
-## Security model
-
-- Both servers bind **127.0.0.1 by default** — nothing is reachable from the
-  network. The WS carries sensitive metadata (process names, SNI, IPs), so the
-  loopback gate also enforces a **browser-origin allowlist** (localhost only),
-  which blocks cross-site WebSocket access from arbitrary websites.
-- `NETPORT_BIND=0.0.0.0` opts into LAN viewing; a **per-boot token** is then
-  required on every WS connection (printed as a ready-to-open URL).
-- Control messages are validated (`switch_iface` must name a real interface);
-  client frames capped at 4KB.
-- Outbound traffic: exactly **one** public-IP geolocation lookup per session
-  (HTTPS-first chain; env-overridable) — nothing else leaves the machine.
-- Capture requires root (BPF). The UI process is an ordinary browser tab.
-
-**Privilege separation** (`priv-broker.ts`). Started via `sudo`, `index.ts` forks
-a root **broker** that owns the only root-needing work (spawning `tshark`/`tcpdump`,
-polling `lsof`) and streams `RawPacket`s + the process map to the parent over IPC.
-The parent then `setgid`/`setgroups`/`setuid`s to the invoking user, so the WS
-control channel, HTTP server, flow tracker, and parsers all run unprivileged; the
-broker listens on no socket. After the drop, `assertNotRoot()` checks
-`process.getuid()` and emits a WS `still_root` error if still uid 0. `switch_iface`
-is a command to the broker; the parent can't re-elevate. Falls back to the
-**inline** single-process path when not root / not via sudo / Windows / when
-`NETPORT_NO_PRIVDROP=1`. NDJSON export is written by the (unprivileged) parent.
+**Accessibility.** `SceneAnnouncer` provides an off-screen description and a
+live region for the selected flight; the boards are listboxes; `[` and `]` step
+through flights; `prefers-reduced-motion` turns off orbits and flares.
 
 ## Process attribution
 
-`process-names.ts` polls `lsof -i -nP +c0 -FpcPn` keyed on `proto:localPort`,
-with an **adaptive cadence**: when the flow tracker sees a young unattributed
-flow it signals a miss (`onProcessMiss` → debounced `boost` IPC to the root
-broker in privilege-separated runs), which triggers an immediate poll and holds
-a 500ms interval for ~6s; idle cadence is 2s. Flows that close before any poll
-stay `process: '—'`; UDP ephemeral port reuse can collide; non-sudo runs only
-see the current user's sockets. Late resolution emits `updated` and recolors
-markers + meshes.
+`process-names.ts` polls `lsof` keyed on `proto:localPort`. The interval is 2 s
+when idle. When the flow tracker sees a young unattributed flow, it signals a
+miss (sent to the broker as a `boost` message in brokered runs), which triggers
+an immediate poll and a 1 s interval for about 6 s. Rows for closed sockets are
+kept for 3 s so very short flows can still be attributed, and then expire. Late
+attribution emits `updated`, and both views recolor the plane.
 
-## IPv4/IPv6 merge status
+## IPv4/IPv6 merging
 
-Flow keys merge across address families: a resolved hostname (SNI or reverse
-DNS) keys the flow as `localIp>host:hostname:port:proto`, so v4 + v6 flows to
-the same host become **one flight** (late resolution re-keys and absorbs the
-duplicate, combining byte counters). Hostless IPv6 flows merge within their
-`/64`. The residual gap: until a hostname resolves, a v4 + v6 pair renders as
-two flights.
+Once a hostname is known (SNI or reverse DNS), the flow key becomes
+`localIp>host:hostname:port:proto`, so IPv4 and IPv6 flows to the same host become
+one flight. Late resolution re-keys the flow and absorbs the duplicate, adding
+up the byte counters. Hostless IPv6 flows merge within their `/64`. Until a
+hostname resolves, a v4 and v6 pair shows as two flights.
 
-## Livery
+## Replay and diagnostics
 
-Brand colors in `src/lib/livery.ts`: `BRAND_COLORS` map + cross-platform
-`ALIASES` regex table. Precedence: resolved process brand → hostname-hash HSL.
-System processes are muted gray. See `tests/livery.test.ts`.
+`npm run replay -- session.ndjson --speed 10` (`server/scripts/replay.ts`)
+replays recorded `FlightEvent`s over WebSocket without capturing. In the
+browser, `store/diagnostics.ts` records WebSocket close codes and lazy-chunk
+failures, shown as hints in the top bar; the stethoscope button exports them as
+JSON.
 
-## Load testing & replay
+## Conventions
 
-`npm run replay -- session.ndjson --speed 10` (`server/scripts/replay.ts`) reads
-exported NDJSON and replays `FlightEvent`s over WS without live capture. Dev FPS
-overlay: `VITE_FPS=1` or press **F** in dev mode. Client render cap: 150 main +
-20 DNS (`lib/render-queue.ts`).
-
-## Client diagnostics
-
-`src/store/diagnostics.ts` records WebSocket close codes/reasons and lazy-chunk
-load failures (globe). Surfaced as amber hints in the metrics strip + toasts;
-**Export diagnostics** (stethoscope icon) downloads a JSON snapshot.
-
-## Testing & conventions
-
-- **Verification gate:** `npm run check` = `tsc -b` + `tsc -p
-  tsconfig.server.json` + eslint + vitest (151 tests; pure logic in `tests/*.ts`,
-  component tests in `tests/*.test.tsx` on happy-dom). Enforced in CI
-  (`.github/workflows/ci.yml`).
-- **Browser smoke / visual checks** run via the Cursor browser or Playwright MCP
-  against demo or live mode; they are not part of `check` or CI.
-- TypeScript strict everywhere; `src/types.ts` is the single protocol source
-  shared by server and client (`tsconfig.server.json` compiles both).
-- Frontend imports via the `@/` alias; the server uses relative `../src/` imports.
+- `npm run check` (both tsconfigs, ESLint, vitest) is the gate, enforced in CI
+  together with a runtime-dependency `npm audit`.
+- TypeScript is strict everywhere. `src/types.ts` is the protocol definition
+  shared by server and client.
+- Frontend imports use the `@/` alias; the server imports `../src/` relatively.
+- Pure logic lives in `src/lib` and `server/` modules with unit tests in
+  `tests/`; component tests run on happy-dom.
