@@ -15,7 +15,10 @@ export interface SupervisorEvents {
   noBackend(): void;
 }
 
-const PERMISSION_RE = /permission|denied|bpf|root|operation not permitted/i;
+// Only real permission failures stop restarts. A broad /bpf|root/ also matched
+// e.g. a BPF filter compile error and blocked recovery for good.
+const PERMISSION_RE =
+  /permission denied|operation not permitted|don't have permission|insufficient privileges|\/dev\/bpf/i;
 const RESTART_DELAY_MS = 2000;
 const DEAD_WINDOW_MS = 30_000;
 

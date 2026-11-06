@@ -7,7 +7,7 @@
 import { WebSocketServer, WebSocket } from 'ws';
 import type { IncomingMessage } from 'http';
 import { timingSafeEqual } from 'crypto';
-import { WS_FLUSH_MS, WS_MAX_PAYLOAD } from './config';
+import { WS_FLUSH_MS, WS_MAX_PAYLOAD, WS_SKIP_BUFFERED, WS_DROP_BUFFERED } from './config';
 import type {
   BackendInfo,
   ClientMessage,
@@ -20,6 +20,7 @@ import type {
 export interface WsHubOpts {
   host: string;
   token: string | null; // null = loopback mode (origin check only)
+  ready?: boolean; // false = refuse connections until markReady() (default true)
 }
 
 const MAX_IFACE_LEN = 64;
@@ -57,7 +58,7 @@ function tokenMatches(given: string | null, expected: string): boolean {
 const LOCAL_HOSTNAMES = new Set(['localhost', '127.0.0.1', '::1', '[::1]']);
 const rejectedOrigins = new Set<string>(); // log each offender once
 
-function verifyClient(
+export function verifyClient(
   opts: WsHubOpts,
   info: { origin?: string; req: IncomingMessage },
 ): boolean {
@@ -88,6 +89,7 @@ export class WsHub {
   private wss: WebSocketServer;
   private queue: FlightEvent[] = [];
   private flushTimer: ReturnType<typeof setInterval>;
+  private ready: boolean;
   private lastError: { code: string; message: string } | null = null;
   onClient: ((msg: ClientMessage, reply: (m: ServerMessage) => void) => void) | null = null;
 
@@ -96,12 +98,15 @@ export class WsHub {
     private getInit: () => { homeAirports: HomeAirport[]; backend: BackendInfo; flights: Flight[] },
     opts: WsHubOpts,
   ) {
+    this.ready = opts.ready ?? true;
     this.wss = new WebSocketServer({
       port,
       host: opts.host,
       maxPayload: WS_MAX_PAYLOAD, // ClientMessage is tiny; bound hostile frames
+      // Refuse everyone until markReady(): under sudo the hub starts while the
+      // process is still root, and nothing should be served before the drop.
       verifyClient: (info: { origin?: string; req: IncomingMessage }) =>
-        verifyClient(opts, info),
+        this.ready && verifyClient(opts, info),
     });
     // Belt-and-suspenders: the preflight in index.ts catches a busy port, but
     // guard the 'error' event too so a late EADDRINUSE can't crash uncaught.
@@ -167,15 +172,29 @@ export class WsHub {
     this.broadcast({ type: 'batch', events });
   }
 
+  markReady(): void {
+    this.ready = true;
+  }
+
+  // Backpressure: a client that stops reading must not grow our buffer without
+  // limit. Skip its batches past 1 MB buffered; disconnect it past 8 MB.
+  private push(ws: WebSocket, data: string): void {
+    if (ws.readyState !== WebSocket.OPEN) return;
+    if (ws.bufferedAmount > WS_DROP_BUFFERED) {
+      ws.terminate();
+      return;
+    }
+    if (ws.bufferedAmount > WS_SKIP_BUFFERED) return;
+    ws.send(data);
+  }
+
   private sendTo(ws: WebSocket, msg: ServerMessage): void {
-    if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(msg));
+    this.push(ws, JSON.stringify(msg));
   }
 
   private broadcast(msg: ServerMessage): void {
     const data = JSON.stringify(msg);
-    for (const client of this.wss.clients) {
-      if (client.readyState === WebSocket.OPEN) client.send(data);
-    }
+    for (const client of this.wss.clients) this.push(client, data);
   }
 
   stop(): void {

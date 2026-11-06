@@ -36,4 +36,10 @@ describe('applyLsofOutput / lookupProcess', () => {
     applyLsofOutput(['p777', 'cssh', 'PTCP', 'n10.0.0.2:51000->10.0.0.1:22'].join('\n'));
     expect(lookupProcess(50000, 'TCP')).toBeNull();
   });
+
+  it('keeps v4 and v6 sockets on the same port apart, and honors an empty poll', () => {
+    applyLsofOutput(['p10', 'cnode', 'PTCP', 'n127.0.0.1:3000', 'p20', 'cpython', 'PTCP', 'n[::1]:3000'].join('\n'));
+    expect(lookupProcess(3000, 'TCP', false)?.pid).toBe(10);
+    expect(lookupProcess(3000, 'TCP', true)?.pid).toBe(20);
+  });
 });

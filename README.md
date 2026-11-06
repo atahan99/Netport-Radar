@@ -72,8 +72,8 @@ to your user before it parses anything.
 
 ### What leaves the machine
 
-- One geolocation lookup of your public IP per session (`ipapi.co`, falling back
-  to `ip-api.com`, then `api.ipify.org` with the local GeoIP database). Set
+- One geolocation lookup of your public IP per session over HTTPS (`ipapi.co`,
+  falling back to `api.ipify.org` with the local GeoIP database). Set
   `NETPORT_HOME_LAT`/`NETPORT_HOME_LNG` to skip it.
 - Reverse DNS lookups for remote IPs with no SNI or HTTP host.
 - Map tiles from CARTO, and Esri imagery for the Satellite theme.
@@ -147,6 +147,13 @@ and screen readers, and `prefers-reduced-motion` is honored.
 - Process names come from polling `lsof` by local port, so connections that
   close before a poll stay unattributed, and UDP port reuse can mislabel a flow.
 - IPv4 and IPv6 flows to the same server merge only once a hostname is known.
+- At most 4,000 flows are tracked at once. Under a scan or flood, new flows are
+  dropped (with a notice) until older ones close, so memory stays bounded.
+- On a shared machine, other local accounts can also connect to the loopback
+  WebSocket and read the feed. The origin check stops websites, not local users.
+- Under sudo, `dumpcap`/`tcpdump` are resolved from your `PATH` and run as root.
+  The resolved paths are printed at startup; make sure they aren't writable by
+  other users.
 
 ## Development
 

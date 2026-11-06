@@ -16,6 +16,9 @@ import {
   haversineKm,
   startCapture,
   startDecoder,
+  resolvedPath,
+  tsharkPath,
+  dumpcapPath,
   type CaptureBackend,
   type RawPacket,
   type Decoder,
@@ -35,15 +38,15 @@ import {
   noteLookupMiss,
 } from './process-names';
 import type { BrokerIn, BrokerOut } from './priv-broker';
-import { WS_PORT, HTTP_PORT, BIND_HOST, IS_LOCAL_BIND, TOKEN } from './config';
+import { WS_PORT, HTTP_PORT, BIND_HOST, IS_LOCAL_BIND, TOKEN, MAX_FLOWS } from './config';
 
 function getDefaultInterface(): string {
   try {
     if (process.platform === 'darwin') {
-      const m = execSync('route -n get default 2>/dev/null').toString().match(/interface:\s*(\w+)/);
+      const m = execSync('route -n get default 2>/dev/null').toString().match(/interface:\s*(\S+)/);
       if (m) return m[1];
     } else if (process.platform === 'linux') {
-      const m = execSync('ip route show default 2>/dev/null').toString().match(/dev\s+(\w+)/);
+      const m = execSync('ip route show default 2>/dev/null').toString().match(/dev\s+(\S+)/);
       if (m) return m[1];
     }
   } catch {
@@ -64,8 +67,14 @@ function getLocalIps(): Set<string> {
 }
 
 function openBrowser(url: string): void {
+  // Never launch a browser as root (inline root mode); print the URL instead.
+  if (process.getuid?.() === 0) {
+    console.log(`[serve] open ${url}`);
+    return;
+  }
+  // Windows: the first quoted argument to \`start\` is the window title.
   const cmd =
-    process.platform === 'darwin' ? 'open' : process.platform === 'win32' ? 'start' : 'xdg-open';
+    process.platform === 'darwin' ? 'open' : process.platform === 'win32' ? 'start ""' : 'xdg-open';
   try {
     execSync(`${cmd} "${url}"`);
   } catch {
@@ -129,6 +138,12 @@ async function main(): Promise<void> {
   }
 
   const backend: CaptureBackend = detectBackend();
+  // Root runs these binaries (brokered mode), so say exactly which ones.
+  if (backend === 'tshark') {
+    console.log(`[capture] tshark=${resolvedPath(tsharkPath())} dumpcap=${resolvedPath(dumpcapPath())}`);
+  } else if (backend === 'tcpdump') {
+    console.log(`[capture] tcpdump=${resolvedPath('tcpdump')}`);
+  }
   let iface = process.env.NETPORT_IFACE ?? getDefaultInterface();
   const backendInfo: BackendInfo = {
     capture: backend,
@@ -155,6 +170,7 @@ async function main(): Promise<void> {
   const ws = new WsHub(WS_PORT, () => ({ homeAirports, backend: backendInfo, flights: tracker.snapshot() }), {
     host: BIND_HOST,
     token: TOKEN,
+    ready: false, // opened after the privilege drop, below
   });
   // Capturing on a VPN tunnel interface → the home airport is a VPN exit.
   const VPN_IFACE = /^(utun|tun|tap|wg|ppp)/i;
@@ -162,7 +178,7 @@ async function main(): Promise<void> {
   let lastHomeSig = '';
   const sourceIpHits = new Map<string, number>();
 
-  // Single source of truth for homeAirports: the ip-api primary, VPN-flagged if
+  // Single source of truth for homeAirports: the geolocated primary, VPN-flagged if
   // we're on a tunnel interface, plus any extra clusters of observed *public*
   // source IPs (multi-homed hosts). Behind home NAT the source IP is private →
   // geoLookup returns null → no extras. Only broadcasts when
@@ -199,6 +215,7 @@ async function main(): Promise<void> {
     sendProcessBoost();
   };
 
+  let lastFlowLimitWarn = 0;
   const tracker = new FlowTracker({
     getHomeAirports: () => homeAirports,
     onEvent: (e) => {
@@ -208,6 +225,13 @@ async function main(): Promise<void> {
     onSourceIp: (ip) => sourceIpHits.set(ip, (sourceIpHits.get(ip) ?? 0) + 1),
     selfProbeIps,
     onProcessMiss,
+    onFlowLimit: () => {
+      const now = Date.now();
+      if (now - lastFlowLimitWarn < 30_000) return; // one notice per 30s, not per packet
+      lastFlowLimitWarn = now;
+      console.warn(`[flows] table full (${MAX_FLOWS}); dropping new flows`);
+      ws.error('capture_error', `Flow table full (${MAX_FLOWS}) — new connections are not shown until some close.`);
+    },
   });
 
   // Packets flowing again means capture recovered from any earlier error.
@@ -216,15 +240,28 @@ async function main(): Promise<void> {
     tracker.ingest(p);
   };
 
-  const refreshHome = () =>
+  // Interface switches can overlap lookups; only the latest result applies.
+  let homeSeq = 0;
+  const refreshHome = () => {
+    const seq = ++homeSeq;
     void resolvePrimaryHome().then((home) => {
+      if (seq !== homeSeq) return;
       primaryHome = home;
       publishHomes();
       console.log(`[home] ${home.label} (${home.lat.toFixed(2)}, ${home.lng.toFixed(2)})`);
     });
+  };
   refreshHome();
   // Re-cluster periodically so a newly-seen public source IP can add a VPN exit.
-  const clusterTimer = setInterval(publishHomes, 10_000);
+  // One shared set of this machine's addresses, refreshed in place on the same
+  // 10s timer, so a DHCP renewal or VPN connect doesn't flip flow directions.
+  const localIps = getLocalIps();
+  const clusterTimer = setInterval(() => {
+    const now = getLocalIps();
+    localIps.clear();
+    for (const ip of now) localIps.add(ip);
+    publishHomes();
+  }, 10_000);
 
   let shuttingDown = false;
 
@@ -239,7 +276,7 @@ async function main(): Promise<void> {
   // Inline path (no privilege drop): spawn capture here and poll lsof here.
   function startInlineCapture(): CaptureControl {
     const sup = superviseCapture(
-      (onError) => startCapture(backend, iface, getLocalIps(), ingest, onError),
+      (onError) => startCapture(backend, iface, localIps, ingest, onError),
       {
         permission: () =>
           ws.error('capture_permission', 'No capture permission — run with sudo (see README).'),
@@ -272,11 +309,12 @@ async function main(): Promise<void> {
     const sockDir = mkdtempSync(join(os.tmpdir(), 'netport-'));
     chownSync(sockDir, target.uid, target.gid);
     const sockPath = join(sockDir, 'pcap.sock');
+    process.once('exit', () => rmSync(sockDir, { recursive: true, force: true })); // crash paths too
     const nonce = randomBytes(16).toString('hex');
     let decoder: Decoder | null = null;
     const pcapServer = await startPcapReceiver(sockPath, nonce, (sock) => {
       decoder?.stop(); // a new capture instance (restart / iface switch) replaces the old stream
-      decoder = startDecoder(backend, sock, getLocalIps(), ingest, (msg) =>
+      decoder = startDecoder(backend, sock, localIps, ingest, (msg) =>
         ws.error('capture_error', msg.slice(0, 200)),
       );
     });
@@ -307,7 +345,7 @@ async function main(): Promise<void> {
       }
     });
     broker.on('exit', () => {
-      if (!shuttingDown) ws.error('capture_dead', 'Capture broker exited unexpectedly.');
+      if (!shuttingDown) ws.error('capture_dead', 'Capture broker exited unexpectedly. Restart Netport-Radar to resume capture.');
     });
     const sendBroker = (m: BrokerIn) => {
       try {
@@ -336,9 +374,21 @@ async function main(): Promise<void> {
   const capture: CaptureControl = dropTarget
     ? await startBrokeredCapture(dropTarget)
     : startInlineCapture();
-  if (!dropTarget) assertPrivilegesDropped(false);
+  if (!dropTarget) {
+    assertPrivilegesDropped(false);
+    if (process.getuid?.() === 0) {
+      console.warn('[security] running as root without the broker: packets are dissected as root (see README).');
+    }
+  }
+  ws.markReady();
 
+  // Control messages are cheap to send and expensive to serve (capture
+  // restart + a geolocation request; a 200k-line export). One of each per 2s.
+  const lastControl = { export: 0, switch_iface: 0 };
   ws.onClient = (msg, reply) => {
+    const now = Date.now();
+    if (now - lastControl[msg.type] < 2000) return;
+    lastControl[msg.type] = now;
     if (msg.type === 'export') {
       reply({ type: 'log', ndjson: exportNdjson() });
     } else if (msg.type === 'switch_iface' && msg.iface !== iface) {

@@ -33,3 +33,9 @@ export const PROCESS_POLL_MIN_MS = 750; // min gap between polls (immediate-poll
 export const PROCESS_RETAIN_MS = 3000; // keep lsof rows after socket close (sub-poll flows)
 export const WS_FLUSH_MS = 100; // WS event-batch flush interval
 export const WS_MAX_PAYLOAD = 4096; // max inbound client frame size
+
+// ── Resource bounds (hostile traffic must not grow memory/CPU without limit) ──
+export const MAX_FLOWS = 4000; // tracked flows; beyond this, new flows are dropped
+export const MAX_PTR_INFLIGHT = 32; // concurrent reverse-DNS lookups
+export const WS_SKIP_BUFFERED = 1 << 20; // skip a slow client's batches above 1 MB buffered
+export const WS_DROP_BUFFERED = 8 << 20; // disconnect it above 8 MB

@@ -49,6 +49,17 @@ export function tsharkPath(): string {
   return 'tshark';
 }
 
+// Absolute path a bare command name resolves to (for the boot log), or the
+// name itself if it can't be resolved (Windows, not installed).
+export function resolvedPath(cmd: string): string {
+  if (cmd.includes('/') || process.platform === 'win32') return cmd;
+  try {
+    return execSync(`command -v ${cmd}`, { encoding: 'utf8' }).trim() || cmd;
+  } catch {
+    return cmd;
+  }
+}
+
 // dumpcap ships next to tshark (Wireshark's capture-only helper, no dissectors).
 export function dumpcapPath(): string {
   const t = tsharkPath();
@@ -531,8 +542,18 @@ export function startDecoder(
   // "interface" it accepts any pcap stream on stdin.
   const args = ['-i', '-', ...TSHARK_OUTPUT_ARGS];
   const proc = spawnLineReader(tsharkPath(), args, parseTsharkLine, TSHARK_ERR, localIps, onPacket, onError, input);
+  let stopped = false;
+  // A dissector crash is what the privilege split contains; make it visible and
+  // recoverable. Closing the stream makes the broker kill its dumpcap, and the
+  // broker's capture supervisor restarts capture (or reports it dead).
+  proc.on('exit', (code, signal) => {
+    if (stopped) return;
+    input.destroy();
+    onError(`Packet decoder exited (${signal ?? `code ${code}`}); restarting capture`);
+  });
   return {
     stop: () => {
+      stopped = true;
       input.destroy();
       proc.kill();
     },

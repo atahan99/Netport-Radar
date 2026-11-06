@@ -84,7 +84,15 @@ export function applyLsofOutput(out: string): void {
       const local = val.split('->')[0];
       const m = local.match(/:(\d+)$/);
       if (m && (proto === 'TCP' || proto === 'UDP')) {
-        next.set(`${proto}:${m[1]}`, { command, pid });
+        // IPv6 sockets also get a family-specific key, so a v4 and a v6 socket
+        // on the same port number don't overwrite each other.
+        const entry = { command, pid };
+        if (local.startsWith('[')) {
+          next.set(`${proto}6:${m[1]}`, entry);
+          if (!next.has(`${proto}:${m[1]}`)) next.set(`${proto}:${m[1]}`, entry);
+        } else {
+          next.set(`${proto}:${m[1]}`, entry);
+        }
       }
     }
   }
@@ -104,10 +112,10 @@ export function applyLsofOutput(out: string): void {
     else next.set(key, entry);
   }
 
-  if (next.size > 0) {
-    table = next;
-    onPollCb?.([...next]); // privileged broker forwards this to the parent
-  }
+  // lsof ran (empty output already returned above); an empty table is a real
+  // answer, not a failure, so don't keep serving last poll's sockets.
+  table = next;
+  onPollCb?.([...next]); // privileged broker forwards this to the parent
 }
 
 function scheduleNext(): void {
@@ -152,8 +160,9 @@ export function setProcessTable(entries: [string, ProcEntry][]): void {
 export function lookupProcess(
   localPort: number,
   proto: string,
+  isIPv6 = false,
 ): { process: string; processRaw: string; pid: number } | null {
-  const e = table.get(`${proto}:${localPort}`);
+  const e = (isIPv6 && table.get(`${proto}6:${localPort}`)) || table.get(`${proto}:${localPort}`);
   if (!e) return null;
   return { process: normalizeProcess(e.command), processRaw: e.command, pid: e.pid };
 }

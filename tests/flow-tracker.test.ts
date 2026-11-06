@@ -451,3 +451,18 @@ describe('snapshot (init state for reconnecting clients)', () => {
     tracker.stop();
   });
 });
+
+describe('resource bounds', () => {
+  it('stops creating flows at MAX_FLOWS and reports it, while existing flows keep updating', async () => {
+    const { MAX_FLOWS } = await import('../server/config');
+    const onFlowLimit = vi.fn();
+    const { tracker } = setup({ onFlowLimit });
+    for (let i = 0; i < MAX_FLOWS + 500; i++) {
+      tracker.ingest(pkt({ srcPort: 1024 + (i % 60000), dstIp: `10.${(i >> 16) & 255}.${(i >> 8) & 255}.${i & 255}`, protocol: 'UDP', detectedProtocol: 'UDP' }));
+    }
+    const flows = (tracker as unknown as { flows: Map<string, unknown> }).flows;
+    expect(flows.size).toBe(MAX_FLOWS);
+    expect(onFlowLimit).toHaveBeenCalled();
+    tracker.stop();
+  });
+});

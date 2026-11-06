@@ -25,7 +25,8 @@ import type {
 import { geoLookup } from '../capture'
 import { liveryColor } from '../../src/lib/livery'
 import { flagEmoji } from '../net-utils'
-import { WS_PORT, BIND_HOST, WS_FLUSH_MS } from '../config'
+import { WS_PORT, BIND_HOST, WS_FLUSH_MS, TOKEN } from '../config'
+import { verifyClient } from '../ws'
 
 interface LogOpened {
   t: number
@@ -281,7 +282,12 @@ function runReplay(scheduled: Scheduled[], speed: number, loop: boolean, port: n
   let baseT = queue[0]?.at ?? Date.now()
   let started = Date.now()
 
-  const wss = new WebSocketServer({ port, host: BIND_HOST })
+  // Same gate as the live server: a replayed session is real traffic data.
+  const wss = new WebSocketServer({
+    port,
+    host: BIND_HOST,
+    verifyClient: (info: Parameters<typeof verifyClient>[1]) => verifyClient({ host: BIND_HOST, token: TOKEN }, info),
+  })
   wss.on('connection', (ws) => {
     clients.add(ws)
     const init: ServerMessage = {
@@ -328,6 +334,7 @@ function runReplay(scheduled: Scheduled[], speed: number, loop: boolean, port: n
   tick()
 
   console.log(
+    (TOKEN ? `[replay] token required: ?token=${TOKEN}\n` : '') +
     `[replay] serving ws://${BIND_HOST}:${port} — ${scheduled.length} events at ${speed}×` +
       (loop ? ' (loop)' : ''),
   )
