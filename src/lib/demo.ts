@@ -141,7 +141,6 @@ function makeFlight(now: number, inbound: boolean): SimFlight {
     asn: proc.asn,
     hostname: proc.host,
     sni: undefined,
-    hostnameResolved: false,
     aircraftType: proc.aircraft,
     phase: 'taxi',
     liveryColor: liveryColor(proc.process),
@@ -198,7 +197,6 @@ function advance(sf: SimFlight, now: number): void {
     sf.done = true;
   }
 
-  sf.hostnameResolved = t >= taxiEnd;
   sf.durationMs = Math.max(0, t - taxiEnd);
   const activeMs = Math.max(0, Math.min(t, descEnd) - taxiEnd);
   sf.bytesTotal = Math.round((sf.rate * activeMs) / 1000);

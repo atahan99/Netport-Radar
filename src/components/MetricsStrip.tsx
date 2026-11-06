@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Menu, Map as MapIcon, Globe, Download, CircleHelp, Stethoscope } from 'lucide-react';
+import { downloadFile } from '@/lib/utils';
 import { useFlightsStore } from '@/store/flights';
 import { useFiltersStore } from '@/store/filters';
 import { filterChips } from '@/lib/filter-chips';
@@ -66,13 +67,7 @@ function exportLog() {
       }),
     )
     .join('\n');
-  const blob = new Blob([lines], { type: 'application/x-ndjson' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = `netport-radar-${new Date().toISOString().replace(/[:.]/g, '-')}.ndjson`;
-  a.click();
-  URL.revokeObjectURL(url);
+  downloadFile(lines, 'application/x-ndjson', 'ndjson');
 }
 
 function StripButton({

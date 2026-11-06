@@ -2,26 +2,20 @@ import { create } from 'zustand';
 import type { Flight, HomeAirport } from '@/types';
 
 interface FlightsStore {
-  flights: Flight[]; // ALL flights, never evicted during session
+  flights: Flight[]; // current flights (landed ones are pruned after a linger)
   homeAirports: HomeAirport[];
   selectedFlightId: string | null;
-  offScreenCount: number; // flights beyond the render cap
   setFlights: (flights: Flight[]) => void;
   setHomeAirports: (airports: HomeAirport[]) => void;
   selectFlight: (id: string | null) => void;
-  setOffScreenCount: (n: number) => void;
-  reset: () => void;
 }
 
 export const useFlightsStore = create<FlightsStore>((set) => ({
   flights: [],
   homeAirports: [],
   selectedFlightId: null,
-  offScreenCount: 0,
 
   setFlights: (flights) => set({ flights }),
   setHomeAirports: (homeAirports) => set({ homeAirports }),
   selectFlight: (selectedFlightId) => set({ selectedFlightId }),
-  setOffScreenCount: (offScreenCount) => set({ offScreenCount }),
-  reset: () => set({ flights: [], selectedFlightId: null, offScreenCount: 0 }),
 }));

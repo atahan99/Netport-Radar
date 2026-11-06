@@ -127,7 +127,6 @@ export class LiveState {
       if (!isStr(e.hostname)) return false;
       lf.hostname = e.hostname;
       if (isStr(e.sni)) lf.sni = e.sni;
-      lf.hostnameResolved = true;
       return false;
     }
     if (e.event === 'phase') {

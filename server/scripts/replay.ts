@@ -169,7 +169,6 @@ function flightFromOpened(row: LogOpened, flights: Map<string, Flight>): Flight 
     direction: 'outbound',
     isLan: row.isLan ?? false,
     startedAt: row.t,
-    hostnameResolved: Boolean(row.hostname && row.hostname !== dst.ip),
   }
 
   flights.set(row.id, flight)
@@ -219,7 +218,6 @@ function flightFromClientExport(row: Record<string, unknown>, flights: Map<strin
     direction: 'outbound',
     isLan: Boolean(row.isLan),
     startedAt: Number(row.t ?? Date.now()),
-    hostnameResolved: true,
   }
 
   flights.set(id, flight)
