@@ -120,7 +120,7 @@ export function Board() {
                 )}
               >
                 <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: f.liveryColor }} />
-                <span className="w-[66px] shrink-0 text-zinc-300">{f.id}</span>
+                <span className="w-[76px] shrink-0 whitespace-nowrap text-zinc-300">{f.id}</span>
                 <span className="flex-1 truncate text-zinc-400">
                   {f.process !== '—' && <span className="text-zinc-300">{f.process} · </span>}
                   {f.hostname}
