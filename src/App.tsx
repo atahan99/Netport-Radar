@@ -133,7 +133,7 @@ export default function App() {
         <RadarHUD />
         <SessionStats />
       </div>
-      <div className="absolute right-4 top-4 z-20 flex flex-col items-end gap-2">
+      <div className="absolute right-4 top-4 z-20 flex max-w-[calc(100vw-2rem)] flex-col items-end gap-2">
         <MetricsStrip />
         <FilterChips />
       </div>
