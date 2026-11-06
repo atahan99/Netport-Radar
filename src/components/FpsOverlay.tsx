@@ -18,7 +18,7 @@ export default function FpsOverlay() {
   useEffect(() => {
     if (!import.meta.env.DEV) return
     const onKey = (e: KeyboardEvent) => {
-      if (e.key !== 'f' && e.key !== 'F') return
+      if (!(e.shiftKey && (e.key === 'f' || e.key === 'F'))) return // Shift+F; plain F opens Filters
       const el = document.activeElement as HTMLElement | null
       if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)) return
       setVisible((v) => {

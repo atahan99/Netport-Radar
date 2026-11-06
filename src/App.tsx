@@ -9,8 +9,7 @@ import { useDemoFlights } from '@/lib/demo';
 import { useLiveFlights } from '@/lib/live';
 import FlightCard from '@/components/FlightCard';
 import FilterPanel from '@/components/FilterPanel';
-import DeparturesBoard from '@/components/DeparturesBoard';
-import ArrivalsBoard from '@/components/ArrivalsBoard';
+import { Board } from '@/components/Board';
 import RadarHUD from '@/components/RadarHUD';
 import MetricsStrip from '@/components/MetricsStrip';
 import ReconnectingOverlay from '@/components/ReconnectingOverlay';
@@ -84,6 +83,19 @@ export default function App() {
         }
         return;
       }
+      // Single-key shortcuts: F filters, L legend, G 2D/3D. Never while typing
+      // or with a modifier held (Shift+F is the dev FPS overlay).
+      const typing = (() => {
+        const el = document.activeElement as HTMLElement | null;
+        return !!el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable);
+      })();
+      if (!typing && !e.metaKey && !e.ctrlKey && !e.altKey && !e.shiftKey) {
+        const f = useFiltersStore.getState();
+        const k = e.key.toLowerCase();
+        if (k === 'f') return f.toggleFilterDrawer();
+        if (k === 'l') return f.toggleLegend();
+        if (k === 'g') return f.setViewMode(f.viewMode === '2d' ? '3d' : '2d');
+      }
       // [ / ] step backward / forward through the on-screen flights — keyboard
       // access to planes (the canvas markers aren't individually focusable).
       if (e.key === '[' || e.key === ']') {
@@ -129,15 +141,12 @@ export default function App() {
         <FilterChips />
       </div>
       <Legend />
-      {/* Bottom row: departures · docked flight card · arrivals */}
-      <div className="pointer-events-none absolute inset-x-0 bottom-4 z-10 flex items-end justify-between gap-2 px-4">
+      {/* Bottom row: tabbed board · docked flight card */}
+      <div className="pointer-events-none absolute inset-x-0 bottom-4 z-10 flex items-end gap-2 px-4">
         <div className="pointer-events-auto shrink-0">
-          <DeparturesBoard />
+          <Board />
         </div>
         <FlightCard />
-        <div className="pointer-events-auto hidden shrink-0 min-[900px]:block">
-          <ArrivalsBoard />
-        </div>
       </div>
 
       {/* Filter drawer (shadcn Sheet) */}

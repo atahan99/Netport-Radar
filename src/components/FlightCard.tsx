@@ -15,8 +15,10 @@ import type { Flight, HomeAirport } from '@/types';
 
 const GLOBE_R = 100;
 
+// Width leaves room for the board beside it in the bottom row:
+// 360px board + 2×16px padding + 8px gap + 8px slack (300px board below 900px).
 const CARD_CLASS =
-  'pointer-events-auto z-30 w-[340px] max-w-[min(340px,calc(100vw-560px))] overflow-hidden rounded-xl border border-zinc-700/80 bg-zinc-950/95 shadow-2xl ring-1 ring-black/40 backdrop-blur-sm max-[899px]:max-w-[min(340px,calc(100vw-300px))]';
+  'pointer-events-auto z-30 w-[340px] max-w-[min(340px,calc(100vw-408px))] overflow-hidden rounded-xl border border-zinc-700/80 bg-zinc-950/95 shadow-2xl ring-1 ring-black/40 backdrop-blur-sm max-[900px]:max-w-[min(340px,calc(100vw-348px))]';
 
 interface ScreenPos {
   x: number;
@@ -214,7 +216,7 @@ export default function FlightCard() {
 
   const f = flights.find((x) => x.id === selectedId);
   if (!f) {
-    // Keep the flex slot so departures/arrivals stay pinned to the edges.
+    // Keep the flex slot so the board stays pinned left.
     return <div className="min-w-0 flex-1" aria-hidden />;
   }
 
@@ -234,10 +236,11 @@ export default function FlightCard() {
     />
   );
 
-  // Docked: centered in the flex gap between departures and arrivals.
+  // Docked: bottom-right on medium widths, centered once there's room, and
+  // never overlapping the board (both live in one flex row).
   if (mode === 'docked') {
     return (
-      <div className="flex min-w-0 flex-1 justify-center">
+      <div className="flex min-w-0 flex-1 justify-end min-[1300px]:justify-center">
         <div
           ref={cardRef}
           role="dialog"

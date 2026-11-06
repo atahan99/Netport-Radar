@@ -86,17 +86,20 @@ function ThemeSwatch({ theme: t }: { theme: Theme }) {
 function StripButton({
   onClick,
   label,
+  shortcut,
   children,
 }: {
   onClick: () => void;
   label: string;
+  shortcut?: string;
   children: React.ReactNode;
 }) {
   return (
     <button
       onClick={onClick}
       aria-label={label}
-      title={label}
+      aria-keyshortcuts={shortcut}
+      title={shortcut ? `${label} (${shortcut})` : label}
       className="flex h-7 w-7 items-center justify-center rounded-md border border-zinc-700 text-zinc-300 hover:bg-zinc-800 hover:text-zinc-50 [&_svg]:h-3.5 [&_svg]:w-3.5"
     >
       {children}
@@ -112,7 +115,13 @@ export default function MetricsStrip() {
   const setViewMode = useFiltersStore((s) => s.setViewMode);
   const toggleFilterDrawer = useFiltersStore((s) => s.toggleFilterDrawer);
   const toggleLegend = useFiltersStore((s) => s.toggleLegend);
-  const [legendHint, setLegendHint] = useState(() => !legendSeen());
+  // First-visit hint on the legend button. It ends the first time the legend
+  // opens, by button or by the L key (recorded below, read back here).
+  const legendOpen = useFiltersStore((s) => s.legendOpen);
+  const legendHint = !legendOpen && !legendSeen();
+  useEffect(() => {
+    if (legendOpen) markLegendSeen();
+  }, [legendOpen]);
   // Narrow screens: the strip scrolls. Start scrolled to the end so the
   // controls are visible; the metrics are a swipe away.
   const stripRef = useRef<HTMLDivElement>(null);
@@ -245,9 +254,14 @@ export default function MetricsStrip() {
         </SelectContent>
       </Select>
 
+      {/* Toolbar groups: view · panels · data */}
       <div className="flex shrink-0 items-center gap-1.5">
+        <StripButton onClick={() => setViewMode(viewMode === '2d' ? '3d' : '2d')} label="2D / 3D" shortcut="G">
+          {viewMode === '2d' ? <MapIcon /> : <Globe />}
+        </StripButton>
+        <span className="mx-0.5 h-5 w-px bg-zinc-700" aria-hidden="true" />
         <div className="relative">
-          <StripButton onClick={toggleFilterDrawer} label="Filters">
+          <StripButton onClick={toggleFilterDrawer} label="Filters" shortcut="F">
             <Menu />
           </StripButton>
           {hasActiveFilters && (
@@ -255,23 +269,14 @@ export default function MetricsStrip() {
           )}
         </div>
         <div className="relative">
-          <StripButton
-            onClick={() => {
-              markLegendSeen();
-              setLegendHint(false);
-              toggleLegend();
-            }}
-            label="Legend"
-          >
+          <StripButton onClick={toggleLegend} label="Legend" shortcut="L">
             <CircleHelp />
           </StripButton>
           {legendHint && (
             <span className="pointer-events-none absolute inset-0 rounded-md ring-2 ring-sky-400/70 motion-safe:animate-pulse" />
           )}
         </div>
-        <StripButton onClick={() => setViewMode(viewMode === '2d' ? '3d' : '2d')} label="2D / 3D">
-          {viewMode === '2d' ? <MapIcon /> : <Globe />}
-        </StripButton>
+        <span className="mx-0.5 h-5 w-px bg-zinc-700" aria-hidden="true" />
         <StripButton onClick={doExport} label="Export log">
           <Download />
         </StripButton>
