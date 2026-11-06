@@ -68,17 +68,9 @@ export default function MapView() {
       maxZoom: 12,
     });
     mapRef.current = map;
-    // Compact "ⓘ" (collapsed by default) tucked under the top-right HUD cluster —
-    // Carto/OSM/Esri tile usage requires attribution. CSS nudges it below the
-    // metrics strip so it doesn't sit over the arrivals board (bottom-right).
-    map.addControl(new maplibregl.AttributionControl({ compact: true }), 'top-right');
-    // MapLibre opens the compact control until the first drag; start it
-    // collapsed to the ⓘ (full credits are in the About panel).
-    map.once('load', () => {
-      const el = map.getContainer().querySelector('.maplibregl-ctrl-attrib');
-      el?.classList.remove('maplibregl-compact-show');
-      el?.removeAttribute('open');
-    });
+    // CARTO/OSM terms require a visible credit on the map itself, so it stays
+    // as one small muted line in the corner (full credits are in About).
+    map.addControl(new maplibregl.AttributionControl({ compact: false }), 'bottom-right');
 
     const markers = new Map<string, MarkerEntry>();
     const destBadges = new Map<string, { m: maplibregl.Marker; el: HTMLElement; last: string }>();

@@ -255,7 +255,7 @@ export default function MetricsStrip() {
         </SelectContent>
       </Select>
 
-      {/* Toolbar groups: view · panels · data */}
+      {/* Toolbar groups: view · panels · data · about */}
       <div className="flex shrink-0 items-center gap-1.5">
         <StripButton onClick={() => setViewMode(viewMode === '2d' ? '3d' : '2d')} label="2D / 3D" shortcut="G">
           {viewMode === '2d' ? <MapIcon /> : <Globe />}
@@ -277,15 +277,16 @@ export default function MetricsStrip() {
             <span className="pointer-events-none absolute inset-0 rounded-md ring-2 ring-sky-400/70 motion-safe:animate-pulse" />
           )}
         </div>
-        <StripButton onClick={toggleAbout} label="About and sources">
-          <Info />
-        </StripButton>
         <span className="mx-0.5 h-5 w-px bg-zinc-700" aria-hidden="true" />
         <StripButton onClick={doExport} label="Export log">
           <Download />
         </StripButton>
         <StripButton onClick={exportDiagnostics} label="Export diagnostics">
           <Stethoscope />
+        </StripButton>
+        <span className="mx-0.5 h-5 w-px bg-zinc-700" aria-hidden="true" />
+        <StripButton onClick={toggleAbout} label="About and sources">
+          <Info />
         </StripButton>
       </div>
     </div>
