@@ -114,11 +114,16 @@ export default function MapView() {
         let entry = markers.get(f.id);
         if (!entry) {
           const el = makeMarkerEl(f);
+          // Handlers outlive this frame's `f`: read by id so they see current data.
+          const id = f.id;
           el.addEventListener('click', (ev) => {
             ev.stopPropagation();
-            useFlightsStore.getState().selectFlight(f.id);
+            useFlightsStore.getState().selectFlight(id);
           });
-          el.addEventListener('mousemove', (ev) => showTip(ev.clientX, ev.clientY, flightTipText(f)));
+          el.addEventListener('mousemove', (ev) => {
+            const cur = useFlightsStore.getState().flights.find((x) => x.id === id);
+            if (cur) showTip(ev.clientX, ev.clientY, flightTipText(cur));
+          });
           el.addEventListener('mouseleave', hideTip);
           const m = new maplibregl.Marker({ element: el }).setLngLat([mLng, mLat]).addTo(map);
           entry = makeMarkerEntry(m, f);

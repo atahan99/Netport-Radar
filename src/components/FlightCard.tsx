@@ -149,7 +149,7 @@ function CardBody({
         <Stat label="TX" value={fmtBytes(f.bytesTx)} />
         <Stat label="RX" value={fmtBytes(f.bytesRx)} />
       </div>
-      <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 border-t border-zinc-800/80 px-3 py-1.5 font-mono text-[10px] text-zinc-600">
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 border-t border-zinc-800/80 px-3 py-1.5 font-mono text-[10px] text-zinc-500">
         <span className="text-zinc-400">{f.process}</span>
         <span>PID {f.pid}</span>
         <span>· DPI {dpi}</span>
@@ -255,7 +255,7 @@ export default function FlightCard() {
 
   // Anchored: fixed overlay tracking the selected plane on the map/globe.
   return (
-    <div className="min-w-0 flex-1" aria-hidden>
+    <div className="min-w-0 flex-1">
       <div
         ref={cardRef}
         role="dialog"

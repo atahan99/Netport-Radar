@@ -8,6 +8,7 @@ import { filterChips } from '@/lib/filter-chips';
 import { THEMES, type Theme, type ThemeName } from '@/lib/themes';
 import { useRenderQueue } from '@/hooks/useRenderQueue';
 import { useBackendStore } from '@/store/backend';
+import * as Dialog from '@radix-ui/react-dialog';
 import { Button } from '@/components/ui/button';
 import { liveControl } from '@/lib/live';
 import { fmtRate } from '@/lib/format';
@@ -144,6 +145,7 @@ export default function MetricsStrip() {
   const chunkErrors = useDiagnosticsStore((s) => s.chunkErrors.length);
   const ifaceOptions = demo ? ['demo'] : backend?.interfaces?.length ? backend.interfaces : [iface];
   const [pendingIface, setPendingIface] = useState<string | null>(null);
+  const ifaceTrigger = useRef<HTMLButtonElement>(null);
 
   const doExport = () => (online ? liveControl.send({ type: 'export' }) : exportLog());
   const doSwitch = (withExport: boolean) => {
@@ -229,7 +231,7 @@ export default function MetricsStrip() {
             if (v !== iface) setPendingIface(v);
           }}
         >
-          <SelectTrigger className="h-7 w-[74px] shrink-0" aria-label="Capture interface">
+          <SelectTrigger ref={ifaceTrigger} className="h-7 w-[74px] shrink-0" aria-label="Capture interface">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -299,23 +301,28 @@ export default function MetricsStrip() {
       </div>
     )}
     </div>
-      {pendingIface && (
-        <div
-          className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60"
-          onClick={() => setPendingIface(null)}
-        >
-          <div
-            className="w-[320px] rounded-xl border border-zinc-700 bg-zinc-950 p-4 shadow-2xl"
-            onClick={(e) => e.stopPropagation()}
-            role="dialog"
-            aria-label={`Confirm switch to ${pendingIface}`}
+      <Dialog.Root open={pendingIface !== null} onOpenChange={(o) => !o && setPendingIface(null)}>
+        <Dialog.Portal>
+          <Dialog.Overlay className="fixed inset-0 z-[60] bg-black/60" />
+          <Dialog.Content
+            className="fixed left-1/2 top-1/2 z-[60] w-[320px] max-w-[calc(100vw-2rem)] -translate-x-1/2 -translate-y-1/2 rounded-xl border border-zinc-700 bg-zinc-950 p-4 shadow-2xl outline-none"
+            aria-modal="true"
+            // Keep the app's global Esc handler from also deselecting/closing panels.
+            onEscapeKeyDown={(e) => e.stopPropagation()}
+            // No Dialog.Trigger: hand focus back to the interface picker.
+            onCloseAutoFocus={(e) => {
+              e.preventDefault();
+              ifaceTrigger.current?.focus();
+            }}
           >
-            <div className="text-sm font-medium text-zinc-100">Switch to {pendingIface}?</div>
-            <div className="mt-1 text-xs text-zinc-400">This clears the current session.</div>
+            <Dialog.Title className="text-sm font-medium text-zinc-100">Switch to {pendingIface}?</Dialog.Title>
+            <Dialog.Description className="mt-1 text-xs text-zinc-400">This clears the current session.</Dialog.Description>
             <div className="mt-4 flex justify-end gap-2">
-              <Button size="sm" variant="ghost" onClick={() => setPendingIface(null)}>
-                Cancel
-              </Button>
+              <Dialog.Close asChild>
+                <Button size="sm" variant="ghost">
+                  Cancel
+                </Button>
+              </Dialog.Close>
               <Button size="sm" variant="outline" onClick={() => doSwitch(true)}>
                 Export &amp; switch
               </Button>
@@ -323,9 +330,9 @@ export default function MetricsStrip() {
                 Switch
               </Button>
             </div>
-          </div>
-        </div>
-      )}
+          </Dialog.Content>
+        </Dialog.Portal>
+      </Dialog.Root>
     </>
   );
 }

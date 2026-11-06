@@ -280,7 +280,8 @@ export function useDemoFlights(enabled = true): void {
     const onKey = (e: KeyboardEvent) => {
       if (e.target instanceof HTMLInputElement) return;
       if (e.key === 'r' || e.key === 'R') {
-        const { reconnecting, setReconnecting } = useConnectionStore.getState();
+        const { reconnecting, setReconnecting, bumpAttempt } = useConnectionStore.getState();
+        if (!reconnecting) bumpAttempt(); // stand-in for a failed attempt
         setReconnecting(!reconnecting);
       } else if (e.key === 'b' || e.key === 'B') {
         const base = performance.now();

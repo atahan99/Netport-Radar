@@ -1,6 +1,5 @@
 import { Component, type ReactNode } from 'react';
 import { useFiltersStore } from '@/store/filters';
-import { useDiagnosticsStore } from '@/store/diagnostics';
 
 interface Props {
   children: ReactNode;
@@ -19,7 +18,8 @@ export default class ErrorBoundary extends Component<Props, State> {
   }
 
   componentDidCatch(error: Error): void {
-    useDiagnosticsStore.getState().recordChunkError('View', error);
+    // Not recorded as a chunk error: real chunk-load failures are recorded where
+    // the lazy import rejects (App.tsx); anything else here is an ordinary crash.
     console.error('[view] crashed:', error);
   }
 

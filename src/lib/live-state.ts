@@ -3,7 +3,7 @@
 // from the WebSocket/rAF wiring in live.ts so it can be tested directly.
 // Everything arriving over the socket is treated as untrusted input.
 
-import type { Flight, FlightEvent, ServerMessage } from '@/types';
+import { AIRCRAFT_TYPES, FLIGHT_PHASES, type Flight, type FlightEvent, type FlightPhase, type HomeAirport, type ServerMessage } from '@/types';
 
 export interface LiveFlight extends Flight {
   phaseStartedAt: number; // client clock (performance.now) when current phase began
@@ -14,6 +14,24 @@ const isObj = (v: unknown): v is Record<string, unknown> =>
   typeof v === 'object' && v !== null && !Array.isArray(v);
 const isStr = (v: unknown): v is string => typeof v === 'string';
 const isNum = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
+// Views index lookup tables by these, so an unknown value would throw in render.
+const isPhase = (v: unknown): v is FlightPhase => (FLIGHT_PHASES as readonly unknown[]).includes(v);
+const isType = (v: unknown) => (AIRCRAFT_TYPES as readonly unknown[]).includes(v);
+// Interpolated into marker cssText, so only plain hex colors.
+const isColor = (v: unknown) => isStr(v) && /^#[0-9a-f]{3,8}$/i.test(v);
+// Values whose allowed set is narrower than their primitive type.
+const FIELD_CHECKS: Record<string, (v: unknown) => boolean> = {
+  phase: isPhase,
+  aircraftType: isType,
+  liveryColor: isColor,
+};
+
+// Home airports are drawn at lat/lng; drop entries without finite coordinates.
+function validHomeAirports(list: unknown[]): HomeAirport[] {
+  return list.filter(
+    (a): a is HomeAirport => isObj(a) && isStr(a.id) && isNum(a.lat) && isNum(a.lng),
+  );
+}
 
 // The fields the views read without null checks. A flight missing any of them
 // would throw inside a render or rAF loop.
@@ -23,10 +41,10 @@ export function isFlight(v: unknown): v is Flight {
     isStr(v.id) &&
     isStr(v.process) &&
     isStr(v.hostname) &&
-    isStr(v.phase) &&
+    isPhase(v.phase) &&
     isStr(v.homeAirportId) &&
-    isStr(v.liveryColor) &&
-    isStr(v.aircraftType) &&
+    isColor(v.liveryColor) &&
+    isType(v.aircraftType) &&
     isStr(v.detectedProtocol) &&
     isStr(v.country) &&
     isNum(v.dstLat) &&
@@ -50,10 +68,12 @@ export function parseServerMessage(raw: unknown): ServerMessage | null {
   switch (v.type) {
     case 'init':
       return Array.isArray(v.homeAirports) && isObj(v.backend) && Array.isArray(v.flights)
-        ? (v as unknown as ServerMessage)
+        ? ({ ...v, homeAirports: validHomeAirports(v.homeAirports) } as unknown as ServerMessage)
         : null;
     case 'home_update':
-      return Array.isArray(v.homeAirports) ? (v as unknown as ServerMessage) : null;
+      return Array.isArray(v.homeAirports)
+        ? { type: 'home_update', homeAirports: validHomeAirports(v.homeAirports) }
+        : null;
     case 'batch':
       return Array.isArray(v.events) ? (v as unknown as ServerMessage) : null;
     case 'reset':
@@ -74,7 +94,9 @@ function applyPatch(lf: LiveFlight, patch: unknown): void {
   const target = lf as unknown as Record<string, unknown>;
   for (const [k, val] of Object.entries(patch)) {
     if (k === 'id' || !Object.hasOwn(target, k)) continue;
-    if (typeof val === typeof target[k]) target[k] = val;
+    if (typeof val !== typeof target[k]) continue;
+    if (FIELD_CHECKS[k] && !FIELD_CHECKS[k](val)) continue;
+    target[k] = val;
   }
 }
 
@@ -130,7 +152,7 @@ export class LiveState {
       return false;
     }
     if (e.event === 'phase') {
-      if (!isStr(e.phase)) return false;
+      if (!isPhase(e.phase)) return false;
       const changed = lf.phase !== e.phase;
       if (changed) {
         lf.phaseStartedAt = now;

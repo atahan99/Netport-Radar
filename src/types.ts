@@ -1,23 +1,23 @@
 // netport-radar — shared types. Single source of truth, imported everywhere.
 
-export type FlightPhase =
-  | 'taxi' // waiting for DNS (max 2s), sitting at home airport
-  | 'cruise' // active data flowing, moving along arc
-  | 'hold' // idle >5s, circling near destination
-  | 'descent' // FIN/RST, curving toward destination
-  | 'landed'; // closed, fading out
+// taxi: waiting for DNS (max 2s), at home airport · cruise: data flowing along
+// the arc · hold: idle >5s near destination · descent: FIN/RST · landed: closed.
+export const FLIGHT_PHASES = ['taxi', 'cruise', 'hold', 'descent', 'landed'] as const;
+export type FlightPhase = (typeof FLIGHT_PHASES)[number];
 
-export type AircraftType =
-  | 'widebody'
-  | 'narrowbody'
-  | 'cargo'
-  | 'helicopter'
-  | 'privatejet'
-  | 'satellite'
-  | 'drone'
-  | 'ambulance'
-  | 'stealth'
-  | 'broadcast';
+export const AIRCRAFT_TYPES = [
+  'widebody',
+  'narrowbody',
+  'cargo',
+  'helicopter',
+  'privatejet',
+  'satellite',
+  'drone',
+  'ambulance',
+  'stealth',
+  'broadcast',
+] as const;
+export type AircraftType = (typeof AIRCRAFT_TYPES)[number];
 
 export type DetectedProtocol =
   | 'HTTPS'
