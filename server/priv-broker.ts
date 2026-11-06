@@ -60,6 +60,10 @@ function spawnRaw(onError: (msg: string) => void): ChildProcess | null {
     onError(`capture stream: ${e.message}`);
     p.kill();
   });
+  // The parent closed the stream (its decoder died, or it is stopping): stop
+  // this capturer too, so it can't block on a full pipe as root. The
+  // supervisor sees the exit and restarts or reports it.
+  conn.on('close', () => p.kill());
   return p;
 }
 
