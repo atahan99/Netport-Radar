@@ -6,6 +6,7 @@
 
 import { WebSocketServer, WebSocket } from 'ws';
 import type { IncomingMessage } from 'http';
+import { timingSafeEqual } from 'crypto';
 import { WS_FLUSH_MS, WS_MAX_PAYLOAD } from './config';
 import type {
   BackendInfo,
@@ -20,6 +21,38 @@ export interface WsHubOpts {
   token: string | null; // null = loopback mode (origin check only)
 }
 
+const MAX_IFACE_LEN = 64;
+
+// Inbound frames are untrusted (any local process can connect in loopback mode).
+// Anything that isn't exactly a known ClientMessage is dropped.
+export function parseClientMessage(raw: string): ClientMessage | null {
+  let v: unknown;
+  try {
+    v = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  if (typeof v !== 'object' || v === null || Array.isArray(v)) return null;
+  const m = v as Record<string, unknown>;
+  if (m.type === 'export') return { type: 'export' };
+  if (
+    m.type === 'switch_iface' &&
+    typeof m.iface === 'string' &&
+    m.iface.length > 0 &&
+    m.iface.length <= MAX_IFACE_LEN
+  ) {
+    return { type: 'switch_iface', iface: m.iface };
+  }
+  return null;
+}
+
+function tokenMatches(given: string | null, expected: string): boolean {
+  if (given === null) return false;
+  const a = Buffer.from(given);
+  const b = Buffer.from(expected);
+  return a.length === b.length && timingSafeEqual(a, b);
+}
+
 const LOCAL_HOSTNAMES = new Set(['localhost', '127.0.0.1', '::1', '[::1]']);
 const rejectedOrigins = new Set<string>(); // log each offender once
 
@@ -31,7 +64,7 @@ function verifyClient(
     // Exposed beyond loopback: the token is the only gate. Origin headers are
     // browser-controlled and can be forged by non-browser LAN clients.
     const url = new URL(info.req.url ?? '/', 'ws://x');
-    return url.searchParams.get('token') === opts.token;
+    return tokenMatches(url.searchParams.get('token'), opts.token);
   }
   // Loopback: reachable only from this machine. Remaining threat is a hostile
   // website in the user's own browser — so require a local Origin. No Origin
@@ -87,13 +120,14 @@ export class WsHub {
       this.sendTo(ws, { type: 'init', homeAirports, backend });
       if (this.lastError) this.sendTo(ws, { type: 'error', ...this.lastError });
       ws.on('message', (data) => {
-        let msg: ClientMessage;
+        const msg = parseClientMessage(data.toString());
+        if (!msg) return;
         try {
-          msg = JSON.parse(data.toString()) as ClientMessage;
-        } catch {
-          return;
+          this.onClient?.(msg, (reply) => this.sendTo(ws, reply));
+        } catch (e) {
+          // A handler bug must not take the whole capture server down.
+          console.error('[ws] client message handler failed:', e);
         }
-        this.onClient?.(msg, (reply) => this.sendTo(ws, reply));
       });
     });
     this.flushTimer = setInterval(() => this.flush(), WS_FLUSH_MS);
@@ -113,7 +147,13 @@ export class WsHub {
   }
 
   reset(): void {
+    this.lastError = null;
     this.broadcast({ type: 'reset' });
+  }
+
+  // Capture is healthy again: stop replaying the stale error to new clients.
+  clearError(): void {
+    this.lastError = null;
   }
 
   error(code: string, message: string): void {

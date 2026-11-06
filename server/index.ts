@@ -23,6 +23,7 @@ import {
   haversineKm,
   startCapture,
   type CaptureBackend,
+  type RawPacket,
 } from './capture';
 import { FlowTracker } from './flow-tracker';
 import { WsHub } from './ws';
@@ -385,6 +386,12 @@ async function main(): Promise<void> {
     onProcessMiss,
   });
 
+  // Packets flowing again means capture recovered from any earlier error.
+  const ingest = (p: RawPacket) => {
+    ws.clearError();
+    tracker.ingest(p);
+  };
+
   const refreshHome = () =>
     void resolvePrimaryHome().then((home) => {
       primaryHome = home;
@@ -426,7 +433,7 @@ async function main(): Promise<void> {
     // restarted once; a second death within 30s is declared dead. An intentional
     // kill (switch/shutdown) is distinguished by proc identity.
     function spawnCapture(): void {
-      const proc = startCapture(backend, iface, getLocalIps(), (p) => tracker.ingest(p), onCaptureError);
+      const proc = startCapture(backend, iface, getLocalIps(), ingest, onCaptureError);
       captureProc = proc;
       if (!proc) {
         ws.error('no_backend', 'No capture backend available — install Wireshark (tshark).');
@@ -473,7 +480,7 @@ async function main(): Promise<void> {
     broker.on('message', (m: BrokerOut) => {
       switch (m.t) {
         case 'pkts':
-          for (const p of m.pkts) tracker.ingest(p);
+          for (const p of m.pkts) ingest(p);
           break;
         case 'proc':
           setProcessTable(m.entries);

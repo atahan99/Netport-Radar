@@ -1,6 +1,6 @@
 import { describe, it, expect, afterEach } from 'vitest';
 import { WebSocket } from 'ws';
-import { WsHub } from '../server/ws';
+import { WsHub, parseClientMessage } from '../server/ws';
 import type { BackendInfo, HomeAirport, ServerMessage } from '../src/types';
 
 const HOME: HomeAirport[] = [{ id: 'primary', label: 'Home', lat: 0, lng: 0, ip: '', isVpn: false }];
@@ -82,5 +82,58 @@ describe('WsHub security gate (Phase 6)', () => {
     await expect(connect(port)).rejects.toThrow('rejected'); // no token
     await expect(connect(port, { path: '/?token=wrong' })).rejects.toThrow('rejected');
     await expect(connect(port, { path: '/?token=s3cr3t' })).resolves.toBeDefined();
+  });
+});
+
+describe('WsHub inbound validation', () => {
+  it('parseClientMessage accepts only well-formed messages', () => {
+    expect(parseClientMessage('{"type":"export"}')).toEqual({ type: 'export' });
+    expect(parseClientMessage('{"type":"switch_iface","iface":"en0"}')).toEqual({
+      type: 'switch_iface',
+      iface: 'en0',
+    });
+    for (const bad of [
+      'null',
+      '[]',
+      '{}',
+      '42',
+      '"x"',
+      'not json',
+      '{"type":"switch_iface"}',
+      '{"type":"switch_iface","iface":123}',
+      '{"type":"switch_iface","iface":""}',
+      `{"type":"switch_iface","iface":"${'a'.repeat(65)}"}`,
+      '{"type":"nope"}',
+    ]) {
+      expect(parseClientMessage(bad), bad).toBeNull();
+    }
+  });
+
+  it('survives malformed frames and a throwing handler, and keeps serving clients', async () => {
+    const { hub, port } = makeHub(null);
+    let calls = 0;
+    hub.onClient = () => {
+      calls++;
+      throw new Error('handler bug');
+    };
+    const { ws } = await connect(port);
+    for (const f of ['null', '{}', '{"type":"switch_iface"}', '{"type":"switch_iface","iface":7}']) {
+      ws.send(f);
+    }
+    ws.send('{"type":"export"}'); // valid → reaches the (throwing) handler
+    await new Promise((r) => setTimeout(r, 100));
+    expect(calls).toBe(1);
+    await expect(connect(port)).resolves.toBeDefined();
+    ws.close();
+  });
+
+  it('stops replaying an error once cleared', async () => {
+    const { hub, port } = makeHub(null);
+    hub.error('capture_error', 'restarting');
+    hub.clearError();
+    const { ws, msgs } = await connect(port);
+    await new Promise((r) => setTimeout(r, 50));
+    expect(msgs.map((m) => m.type)).toEqual(['init']);
+    ws.close();
   });
 });
