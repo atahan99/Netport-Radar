@@ -2,7 +2,7 @@
 // Applying a theme to the dark-matter basemap at the MapLibre paint level.
 // The per-property color decision is the pure recolorValue (map-recolor.ts).
 
-import type maplibregl from 'maplibre-gl';
+import type * as maplibregl from 'maplibre-gl';
 import type { Theme } from './themes';
 import { recolorValue } from './map-recolor';
 
@@ -14,7 +14,8 @@ export function recolorMap(map: maplibregl.Map, snaps: Map<string, PaintSnap>, t
   for (const [id, snap] of snaps) {
     const val = recolorValue(snap.prop, id, theme.mapRecolor) ?? snap.value;
     try {
-      map.setPaintProperty(id, snap.prop, val as string);
+      // snap.prop comes from the loaded style itself, so it is a valid paint key.
+      map.setPaintProperty(id, snap.prop as Parameters<maplibregl.Map["setPaintProperty"]>[1], val as string);
     } catch {
       /* layer/prop gone after a style swap — ignore */
     }

@@ -2,7 +2,7 @@
 // DOM for the 2D map's HTML markers (planes, destination pins, home airports)
 // and the cached per-marker paint state that keeps per-frame style writes cheap.
 
-import type maplibregl from 'maplibre-gl';
+import type * as maplibregl from 'maplibre-gl';
 import type { Flight, HomeAirport } from '@/types';
 import type { Pose } from './lifecycle';
 import { AIRCRAFT_ICONS, AIRCRAFT_SIZE } from './icons';

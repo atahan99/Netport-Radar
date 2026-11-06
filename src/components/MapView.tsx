@@ -1,5 +1,9 @@
 import { useEffect, useRef } from 'react';
-import maplibregl from 'maplibre-gl';
+import * as maplibregl from 'maplibre-gl';
+// MapLibre 6 resolves its tile worker relative to its own module URL, which
+// doesn't survive Vite's dependency pre-bundling. Let Vite bundle the worker
+// (shared chunk included) and hand MapLibre the URL.
+import maplibreWorkerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url';
 import type { Feature, FeatureCollection } from 'geojson';
 import { useFlightsStore } from '@/store/flights';
 import { useFiltersStore } from '@/store/filters';
@@ -35,6 +39,8 @@ const OVERLAY_MS = 100;
 // Chip declutter: max non-selected chips at mid zoom, ranked by throughput.
 const TOP_CHIPS = 15;
 
+
+maplibregl.setWorkerUrl(maplibreWorkerUrl);
 
 export default function MapView() {
   const containerRef = useRef<HTMLDivElement>(null);

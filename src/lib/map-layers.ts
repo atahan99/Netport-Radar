@@ -3,7 +3,7 @@
 // destination markers). setStyle (theme swap) drops custom layers, so MapView
 // calls this after every style load; it's idempotent.
 
-import type maplibregl from 'maplibre-gl';
+import type * as maplibregl from 'maplibre-gl';
 
 export function addFlightOverlay(map: maplibregl.Map): void {
   if (map.getSource('arcs')) return;

@@ -19,3 +19,6 @@ jobs:
       # tsc (app) + tsc (server) + eslint + vitest — no system capture deps needed:
       # the capture tests parse fixture strings and ws-hub uses the `ws` package.
       - run: npm run check
+      # Runtime dependencies only: the shipped code must have no high/critical
+      # advisories. Dev-toolchain advisories are reviewed on dependency bumps.
+      - run: npm audit --omit=dev --audit-level=high
