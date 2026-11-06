@@ -124,21 +124,25 @@ export function Board() {
               >
                 <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: f.liveryColor }} />
                 <span className="w-[76px] shrink-0 whitespace-nowrap text-zinc-300">{f.id}</span>
-                <span className="flex-1 truncate text-zinc-400">
+                <span className="min-w-0 flex-1 truncate text-zinc-400">
                   {f.process !== '—' && <span className="text-zinc-300">{f.process} · </span>}
                   {f.hostname}
                 </span>
-                <span className="shrink-0 font-mono text-[10px]">
+                {/* Fixed-width trailing columns (country · phase · VPN slot) so
+                    flags and statuses line up whether or not a row has a badge. */}
+                <span className="flex w-[46px] shrink-0 items-center gap-1 font-mono text-[10px]">
                   {geo}
                   {/* A flag emoji alone is hard to read; ~CC / ?? already show the code. */}
-                  {geo === f.countryFlag && <span className="ml-1 text-zinc-400">{f.country}</span>}
+                  {geo === f.countryFlag && <span className="text-zinc-400">{f.country}</span>}
                 </span>
-                <span className={cn('w-[54px] shrink-0 text-right', PHASE_META[f.phase].textClass)}>
+                <span className={cn('w-[60px] shrink-0 text-right', PHASE_META[f.phase].textClass)}>
                   {f.phase.toUpperCase()}
                 </span>
-                {home?.isVpn && (
-                  <span className="shrink-0 rounded bg-violet-900/60 px-1 text-[10px] text-violet-300">VPN</span>
-                )}
+                <span className="flex w-[30px] shrink-0 justify-end">
+                  {home?.isVpn && (
+                    <span className="rounded bg-violet-900/60 px-1 text-[10px] text-violet-300">VPN</span>
+                  )}
+                </span>
               </button>
             );
           })}
