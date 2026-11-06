@@ -36,7 +36,7 @@ export default function SessionStats() {
 
   return (
     <div
-      className="mt-2 w-[152px] rounded-xl border border-zinc-800 bg-black/85 p-2 font-mono backdrop-blur-sm"
+      className="hud-panel mt-2 w-[152px] rounded-xl border border-zinc-800 bg-black/85 p-2 font-mono backdrop-blur-sm"
       aria-label="Session statistics"
     >
       <div className="mb-2 text-[10px] tracking-wider text-zinc-400">

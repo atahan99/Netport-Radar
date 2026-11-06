@@ -13,12 +13,12 @@ interface Fix {
 const FIXES: Record<string, Fix> = {
   no_backend: {
     title: 'No capture backend found',
-    body: 'netport-radar needs a packet-capture tool. Install Wireshark (which bundles tshark) — or tcpdump — then restart.',
+    body: 'Netport-Radar needs a packet-capture tool. Install Wireshark (which bundles tshark) — or tcpdump — then restart.',
     link: { href: 'https://www.wireshark.org/download.html', label: 'Download Wireshark' },
   },
   port_in_use: {
     title: 'Port 8090 is already in use',
-    body: 'Another process is holding the capture WebSocket port — likely a second netport-radar. Free it, then restart:',
+    body: 'Another process is holding the capture WebSocket port — likely a second Netport-Radar. Free it, then restart:',
     command: 'lsof -ti tcp:8090 | xargs kill',
   },
 };

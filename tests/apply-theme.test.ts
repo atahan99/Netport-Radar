@@ -20,4 +20,15 @@ describe('applyTheme', () => {
     applyTheme('bogus' as ThemeName);
     expect(document.documentElement.dataset.theme).toBe('midnight');
   });
+
+  it('marks light themes so HUD panels switch to light surfaces', () => {
+    applyTheme('arctic');
+    expect(document.documentElement.dataset.themeMode).toBe('light');
+    applyTheme('matrix');
+    expect(document.documentElement.dataset.themeMode).toBe('dark');
+  });
+
+  it('only Arctic is a light theme', () => {
+    expect(Object.values(THEME_BY_ID).filter((t) => t.light).map((t) => t.id)).toEqual(['arctic']);
+  });
 });

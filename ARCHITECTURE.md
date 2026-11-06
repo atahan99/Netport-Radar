@@ -1,6 +1,6 @@
-# netport-radar architecture
+# Netport-Radar architecture
 
-netport-radar is a read-only local network monitor: every connection is drawn as
+Netport-Radar is a read-only local network monitor: every connection is drawn as
 a flight on a great-circle arc. The capture path never injects, blocks or
 modifies traffic. The security model and threat model are in the
 [README](README.md#security-and-infrastructure-design); this document covers how

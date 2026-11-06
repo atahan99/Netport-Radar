@@ -1,7 +1,7 @@
 @import "tailwindcss";
 
-/* netport-radar — dark-only HUD theme. shadcn semantic tokens mapped to a
-   near-black zinc palette. No light mode. */
+/* HUD theme. shadcn semantic tokens mapped to a near-black zinc palette;
+   light themes remap panels via .hud-panel further down. */
 :root {
   --background: 0 0% 3%;
   --foreground: 0 0% 96%;
@@ -150,11 +150,61 @@ body {
   font-family: inherit;
 }
 
-/* Attribution ⓘ: tuck the top-right control group under the HUD metrics strip
-   (clear of the arrivals board at bottom-right). Loaded after maplibre-gl.css so
-   this wins the cascade. */
-.maplibregl-ctrl-top-right {
-  top: 4rem;
+/* Map credit: one small muted line in the bottom-right corner, under the
+   docked flight card's bottom edge. CARTO/OSM require it on the map itself;
+   the full list is in the About panel. Loaded after maplibre-gl.css so this
+   wins the cascade. */
+.maplibregl-ctrl-bottom-right .maplibregl-ctrl-attrib {
+  margin: 0;
+  padding: 0 6px 1px;
+  background: transparent;
+  font-size: 10px;
+  line-height: 14px;
+  color: rgb(161 161 170 / 0.75);
+}
+.maplibregl-ctrl-bottom-right .maplibregl-ctrl-attrib a {
+  color: inherit;
+}
+[data-theme-mode='light'] .maplibregl-ctrl-bottom-right .maplibregl-ctrl-attrib {
+  color: rgb(63 63 70 / 0.8);
+}
+
+/* Light themes (Arctic): HUD panels switch to light surfaces. Tailwind v4
+   compiles text/border/zinc classes to var(--color-*), so remapping the zinc
+   scale inside .hud-panel flips every panel without touching its markup.
+   Literal hex here, not var(): these variables are being redefined in this
+   scope. Opacity-blended black/zinc backgrounds compile to literals, hence
+   the explicit background. Unlayered, so it wins over Tailwind utilities. */
+/* All HUD panels: a soft shadow so they lift off the basemap instead of
+   blending into it (Midnight's panels and land are nearly the same shade). */
+.hud-panel {
+  box-shadow: 0 8px 24px -10px rgb(0 0 0 / 0.65);
+}
+[data-theme-mode='light'] .hud-panel {
+  color-scheme: light;
+  background-color: rgb(255 255 255 / 0.9);
+  --color-black: #ffffff;
+  --color-zinc-950: #fafafa;
+  --color-zinc-900: #f4f4f5;
+  --color-zinc-800: #e4e4e7;
+  --color-zinc-700: #d4d4d8;
+  --color-zinc-600: #71717a;
+  --color-zinc-500: #52525b;
+  --color-zinc-400: #52525b;
+  --color-zinc-300: #3f3f46;
+  --color-zinc-200: #27272a;
+  --color-zinc-100: #18181b;
+  --color-zinc-50: #09090b;
+  /* Phase / rate colors darken to stay readable on white. */
+  --color-blue-400: #1d4ed8;
+  --color-emerald-400: #047857;
+  --color-amber-400: #b45309;
+  --color-orange-400: #c2410c;
+  --color-amber-300: #92400e;
+}
+[data-theme-mode='light'] .hud-panel .hud-scroll::-webkit-scrollbar-thumb,
+[data-theme-mode='light'] .hud-panel.hud-scroll::-webkit-scrollbar-thumb {
+  background: #c4c4c8;
 }
 
 /* Thin dark scrollbars for the boards */

@@ -353,7 +353,7 @@ function main(): void {
   const raw = readFileSync(file, 'utf8')
   const scheduled = parseLines(raw)
   if (scheduled.length === 0) {
-    console.error('[replay] no events parsed — is this a netport-radar NDJSON export?')
+    console.error('[replay] no events parsed — is this a Netport-Radar NDJSON export?')
     process.exit(1)
   }
 

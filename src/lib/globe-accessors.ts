@@ -5,6 +5,8 @@
 
 import type { Flight, HomeAirport } from '@/types';
 import { useFiltersStore } from '@/store/filters';
+import { useFlightsStore } from '@/store/flights';
+import { trailWidth } from './trail-width';
 import { homeRingColor, polygonCapColor, polygonSideColor } from './globe-color';
 
 export interface DestDot {
@@ -20,10 +22,19 @@ export type TrailDatum = Flight & { __remaining?: boolean };
 export const asF = (d: object) => d as Flight;
 
 export const pathPointAlt = (p: unknown) => (p as number[])[2];
-export const pathStroke = (d: object) => ((d as TrailDatum).__remaining ? 1.1 : 1.6);
+// Busier flows draw thicker (trailWidth). Reads the selection from the store
+// so the accessor keeps one identity; GlobeView's trail signature includes
+// the bucketed width, so a change rebuilds the paths.
+export const pathStroke = (d: object) => {
+  const t = d as TrailDatum;
+  if (t.__remaining) return 1.1;
+  return 1.6 * trailWidth(t.bytesPerSec, t.id === useFlightsStore.getState().selectedFlightId);
+};
 
 export const ringLat = (d: object) => (d as HomeAirport).lat;
 export const ringLng = (d: object) => (d as HomeAirport).lng;
+// Home rings pulse slowly; the selected flight's destination beacon faster.
+export const ringRepeatPeriod = (d: object) => ((d as { id?: string }).id === '__dest' ? 900 : 2400);
 export const ringColor = (d: object) => () =>
   (d as { __color?: string }).__color ?? homeRingColor((d as HomeAirport).isVpn);
 

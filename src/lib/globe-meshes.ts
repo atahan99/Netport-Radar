@@ -240,7 +240,7 @@ function getMaterial(color: string, stealth: boolean): THREE.Material {
       roughness: 0.55,
       metalness: 0.35,
       emissive: color,
-      emissiveIntensity: 0.3,
+      emissiveIntensity: 0.45, // enough self-glow that planes stand off the dark globe
       transparent: stealth,
       opacity: stealth ? 0.6 : 1,
     });

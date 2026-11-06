@@ -28,6 +28,7 @@ import { trailSegmentColor } from '@/lib/trail-color';
 import { mapRef } from '@/lib/view-refs';
 import { geoFlagLabel } from '@/lib/geo-display';
 import { placeChips, chipSize, type ChipBox } from '@/lib/chip-layout';
+import { trailWidth } from '@/lib/trail-width';
 import type { HomeAirport } from '@/types';
 
 // 2D trail sampling: arc resolution + gradient segment count per flight.
@@ -67,10 +68,9 @@ export default function MapView() {
       maxZoom: 12,
     });
     mapRef.current = map;
-    // Compact "ⓘ" (collapsed by default) tucked under the top-right HUD cluster —
-    // Carto/OSM/Esri tile usage requires attribution. CSS nudges it below the
-    // metrics strip so it doesn't sit over the arrivals board (bottom-right).
-    map.addControl(new maplibregl.AttributionControl({ compact: true }), 'top-right');
+    // CARTO/OSM terms require a visible credit on the map itself, so it stays
+    // as one small muted line in the corner (full credits are in About).
+    map.addControl(new maplibregl.AttributionControl({ compact: false }), 'bottom-right');
 
     const markers = new Map<string, MarkerEntry>();
     const destBadges = new Map<string, { m: maplibregl.Marker; el: HTMLElement; last: string }>();
@@ -224,6 +224,7 @@ export default function MapView() {
                 color: trailSegmentColor(f.liveryColor, s, TRAIL_SEGS, prog, filters.trailStyle),
                 vpn: home.isVpn,
                 op: t * t * 0.85,
+                w: trailWidth(f.bytesPerSec, f.id === selectedFlightId),
               },
               geometry: { type: 'LineString', coordinates: pts.slice(from, to + 1) },
             });

@@ -1,5 +1,5 @@
 <svg width="100%" viewBox="0 0 680 484" role="img" xmlns="http://www.w3.org/2000/svg">
-<title>netport-radar architecture and data flow</title>
+<title>Netport-Radar architecture and data flow</title>
 <desc>A packet is captured by a root broker that only opens the device (dumpcap or tcpdump -Z, plus lsof), streamed as raw pcap over a nonce-gated Unix socket to an unprivileged server that dissects it (tshark, flow tracker, geo lookup, WS/HTTP), then streamed by WebSocket to the browser, where Zustand stores feed a two-channel renderer driving the 2D map, 3D globe, and HUD.</desc>
 <style>
   text { font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }

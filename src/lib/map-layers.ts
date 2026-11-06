@@ -31,7 +31,9 @@ export function addFlightOverlay(map: maplibregl.Map): void {
     layout: { 'line-cap': 'round', 'line-join': 'round' },
     paint: {
       'line-color': ['get', 'color'],
-      'line-width': ['interpolate', ['linear'], ['zoom'], 1, 1.2, 6, 2.4],
+      // Per-feature width multiplier (trailWidth). zoom must stay the outermost
+      // expression, so the multiplier goes inside each stop.
+      'line-width': ['interpolate', ['linear'], ['zoom'], 1, ['*', 1.2, ['get', 'w']], 6, ['*', 2.4, ['get', 'w']]],
       'line-opacity': ['get', 'op'],
     },
   });
@@ -43,7 +45,9 @@ export function addFlightOverlay(map: maplibregl.Map): void {
     layout: { 'line-cap': 'round', 'line-join': 'round' },
     paint: {
       'line-color': ['get', 'color'],
-      'line-width': ['interpolate', ['linear'], ['zoom'], 1, 1.2, 6, 2.4],
+      // Per-feature width multiplier (trailWidth). zoom must stay the outermost
+      // expression, so the multiplier goes inside each stop.
+      'line-width': ['interpolate', ['linear'], ['zoom'], 1, ['*', 1.2, ['get', 'w']], 6, ['*', 2.4, ['get', 'w']]],
       'line-opacity': ['get', 'op'],
       'line-dasharray': [2, 2],
     },

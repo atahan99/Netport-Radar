@@ -18,7 +18,7 @@ function SheetContent({
       <SheetPrimitive.Overlay className="fixed inset-0 z-40 bg-black/60 animate-fade-in" />
       <SheetPrimitive.Content
         className={cn(
-          'fixed top-0 z-50 h-full w-[280px] bg-zinc-950 p-0 shadow-2xl outline-none',
+          'hud-panel fixed top-0 z-50 h-full w-[280px] bg-zinc-950 p-0 shadow-2xl outline-none',
           side === 'right'
             ? 'right-0 border-l border-zinc-800 animate-sheet-in'
             : 'left-0 border-r border-zinc-800',

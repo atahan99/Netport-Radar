@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Menu, Map as MapIcon, Globe, Download, CircleHelp, Stethoscope } from 'lucide-react';
+import { Menu, Map as MapIcon, Globe, Download, CircleHelp, Info, Stethoscope } from 'lucide-react';
 import { downloadFile } from '@/lib/utils';
 import { legendSeen, markLegendSeen } from '@/lib/legend-hint';
 import { useFlightsStore } from '@/store/flights';
@@ -115,6 +115,7 @@ export default function MetricsStrip() {
   const setViewMode = useFiltersStore((s) => s.setViewMode);
   const toggleFilterDrawer = useFiltersStore((s) => s.toggleFilterDrawer);
   const toggleLegend = useFiltersStore((s) => s.toggleLegend);
+  const toggleAbout = useFiltersStore((s) => s.toggleAbout);
   // First-visit hint on the legend button. It ends the first time the legend
   // opens, by button or by the L key (recorded below, read back here).
   const legendOpen = useFiltersStore((s) => s.legendOpen);
@@ -201,7 +202,7 @@ export default function MetricsStrip() {
   return (
     <>
     <div className="flex max-w-full flex-col items-end gap-1">
-    <div ref={stripRef} className="flex h-10 max-w-full flex-nowrap items-center justify-start gap-x-3 overflow-x-auto rounded-xl border border-zinc-800 bg-black/85 px-3 font-mono text-[11px] text-zinc-300 backdrop-blur-sm [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+    <div ref={stripRef} className="hud-panel flex h-10 max-w-full flex-nowrap items-center justify-start gap-x-3 overflow-x-auto rounded-xl border border-zinc-800 bg-black/85 px-3 font-mono text-[11px] text-zinc-300 backdrop-blur-sm [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
       <div className="flex shrink-0 items-center gap-1.5">
         <span className="text-emerald-400">↓</span>
         <canvas ref={inCanvas} width={40} height={16} className="block h-4 w-10 shrink-0 opacity-90" />
@@ -254,7 +255,7 @@ export default function MetricsStrip() {
         </SelectContent>
       </Select>
 
-      {/* Toolbar groups: view · panels · data */}
+      {/* Toolbar groups: view · panels · data · about */}
       <div className="flex shrink-0 items-center gap-1.5">
         <StripButton onClick={() => setViewMode(viewMode === '2d' ? '3d' : '2d')} label="2D / 3D" shortcut="G">
           {viewMode === '2d' ? <MapIcon /> : <Globe />}
@@ -282,6 +283,10 @@ export default function MetricsStrip() {
         </StripButton>
         <StripButton onClick={exportDiagnostics} label="Export diagnostics">
           <Stethoscope />
+        </StripButton>
+        <span className="mx-0.5 h-5 w-px bg-zinc-700" aria-hidden="true" />
+        <StripButton onClick={toggleAbout} label="About and sources">
+          <Info />
         </StripButton>
       </div>
     </div>

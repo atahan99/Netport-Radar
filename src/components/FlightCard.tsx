@@ -18,7 +18,7 @@ const GLOBE_R = 100;
 // Width leaves room for the board beside it in the bottom row:
 // 360px board + 2×16px padding + 8px gap + 8px slack (300px board below 900px).
 const CARD_CLASS =
-  'pointer-events-auto z-30 w-[340px] max-w-[min(340px,calc(100vw-408px))] overflow-hidden rounded-xl border border-zinc-700/80 bg-zinc-950/95 shadow-2xl ring-1 ring-black/40 backdrop-blur-sm max-[900px]:max-w-[min(340px,calc(100vw-348px))]';
+  'hud-panel pointer-events-auto z-30 w-[340px] max-w-[min(340px,calc(100vw-408px))] overflow-hidden rounded-xl border border-zinc-700/80 bg-zinc-950/95 shadow-2xl ring-1 ring-black/40 backdrop-blur-sm max-[900px]:max-w-[min(340px,calc(100vw-348px))]';
 
 interface ScreenPos {
   x: number;
