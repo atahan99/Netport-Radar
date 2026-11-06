@@ -28,6 +28,7 @@ import { trailSegmentColor } from '@/lib/trail-color';
 import { mapRef } from '@/lib/view-refs';
 import { geoFlagLabel } from '@/lib/geo-display';
 import { placeChips, chipSize, type ChipBox } from '@/lib/chip-layout';
+import { trailWidth } from '@/lib/trail-width';
 import type { HomeAirport } from '@/types';
 
 // 2D trail sampling: arc resolution + gradient segment count per flight.
@@ -224,6 +225,7 @@ export default function MapView() {
                 color: trailSegmentColor(f.liveryColor, s, TRAIL_SEGS, prog, filters.trailStyle),
                 vpn: home.isVpn,
                 op: t * t * 0.85,
+                w: trailWidth(f.bytesPerSec, f.id === selectedFlightId),
               },
               geometry: { type: 'LineString', coordinates: pts.slice(from, to + 1) },
             });

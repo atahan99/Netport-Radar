@@ -23,6 +23,7 @@ import { THEME_BY_ID } from '@/lib/themes';
 import { globeRef as sharedGlobeRef, type GlobeApi } from '@/lib/view-refs';
 import LeaderLine from '@/components/LeaderLine';
 import { positionPlaneMesh, pickFlightAt } from '@/lib/globe-planes';
+import { trailWidth } from '@/lib/trail-width';
 import {
   asF,
   pathPointAlt,
@@ -187,7 +188,7 @@ export default function GlobeView() {
       const set = [...q.mainQueue, ...q.dnsQueue];
       let sig = `${selectedFlightId ?? ''}|${ft.trailStyle}`;
       for (const f of set) {
-        sig += `|${f.id},${f.phase},${liveProgress(f).toFixed(3)},${f.liveryColor},${f.isLan ? 1 : 0},${f.country}`;
+        sig += `|${f.id},${f.phase},${liveProgress(f).toFixed(3)},${f.liveryColor},${f.isLan ? 1 : 0},${f.country},${trailWidth(f.bytesPerSec, f.id === selectedFlightId)}`;
       }
       if (sig !== lastSig) {
         lastSig = sig;
