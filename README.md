@@ -126,9 +126,10 @@ Environment variables, passed through sudo (`sudo NETPORT_BIND=0.0.0.0 npm run s
 
 ## Using it
 
-Click a plane or a departures/arrivals row to open its flight card; `[` and `]`
-step through flights and `Esc` clears the selection. The toolbar has filters,
-the 2D/3D switch, seven themes and a legend. The boards work with the keyboard
+Click a plane or a row on the Departures/Arrivals board to open its flight card;
+`[` and `]` step through flights and `Esc` closes panels or clears the selection.
+`F` opens filters, `L` the legend, and `G` switches between 2D and 3D. The
+toolbar also has seven themes and log/diagnostics export. The boards work with the keyboard
 and screen readers, and `prefers-reduced-motion` is honored.
 
 ## Troubleshooting

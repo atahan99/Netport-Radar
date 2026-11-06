@@ -8,6 +8,7 @@ export type Direction = 'both' | 'outbound' | 'inbound';
 export type AirportFilter = 'all' | 'primary' | 'vpn';
 export type ViewMode = '2d' | '3d';
 export type CardAnchorMode = 'anchored' | 'docked';
+export type BoardTab = 'outbound' | 'inbound';
 
 export type BooleanFilterKey =
   | 'showHTTPS'
@@ -57,6 +58,7 @@ export interface FilterState {
   // Flight-card position — per view so each can default differently
   cardAnchor2d: CardAnchorMode; // default 'docked'
   cardAnchor3d: CardAnchorMode; // default 'docked'
+  boardTab: BoardTab; // which list the bottom board shows (not reset by "Reset all")
   // Actions
   toggle: (key: BooleanFilterKey) => void;
   setDnsDensity: (d: DnsDensity) => void;
@@ -71,6 +73,7 @@ export interface FilterState {
   toggleFilterDrawer: () => void;
   setLegend: (open: boolean) => void;
   toggleLegend: () => void;
+  setBoardTab: (t: BoardTab) => void;
   resetKey: (key: FilterDataKey) => void; // reset one filter to its default
   reset: () => void;
 }
@@ -144,6 +147,7 @@ export const useFiltersStore = create<FilterState>()(
       ...DEFAULTS,
       filterDrawerOpen: false,
       legendOpen: false,
+      boardTab: 'outbound',
 
       toggle: (key) => set((s) => ({ [key]: !s[key] }) as Partial<FilterState>),
       setDnsDensity: (dnsDensity) => set({ dnsDensity }),
@@ -163,6 +167,7 @@ export const useFiltersStore = create<FilterState>()(
       toggleFilterDrawer: () => set((s) => ({ filterDrawerOpen: !s.filterDrawerOpen })),
       setLegend: (legendOpen) => set({ legendOpen }),
       toggleLegend: () => set((s) => ({ legendOpen: !s.legendOpen })),
+      setBoardTab: (boardTab) => set({ boardTab }),
       resetKey: (key) => set({ [key]: DEFAULTS[key] } as Partial<FilterState>),
       reset: () => set({ ...DEFAULTS }),
     }),
@@ -193,6 +198,7 @@ export const useFiltersStore = create<FilterState>()(
         trailStyle: s.trailStyle,
         cardAnchor2d: s.cardAnchor2d,
         cardAnchor3d: s.cardAnchor3d,
+        boardTab: s.boardTab,
       }),
     },
   ),
