@@ -536,6 +536,7 @@ async function main(): Promise<void> {
       sourceIpHits.clear();
       refreshHome();
       capture.switchTo(iface);
+      publishHomes(); // re-derive the VPN flag for the new iface before init goes out
       ws.broadcastInit();
     }
   };
