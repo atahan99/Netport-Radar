@@ -1,22 +1,21 @@
 // server/priv-broker.ts
 // Privileged capture broker. index.ts forks this child WHILE STILL ROOT, then
-// immediately drops itself to the invoking user. The broker keeps the two
-// root-only capabilities — spawning tshark/tcpdump and polling lsof — and streams
-// results to the unprivileged parent over the IPC channel. It listens to no
-// network socket; its only inputs are tshark's (already-decoded) output and the
-// parent's commands, so the network-facing surface (WS/HTTP/flow tracker) stays
-// unprivileged in the parent.
+// drops itself to the invoking user. The broker keeps the two root-only jobs:
+// opening the capture device and polling lsof. It never parses packets itself
+// (see startRawCapture). Each capture instance streams its output to the parent
+// over a private Unix socket (0700 dir), prefixed with a per-boot nonce so the
+// parent only decodes streams that came from this broker.
 //
-// Parent → broker: { t:'init'|'switch', backend?, iface } · { t:'stop' }
-// Broker → parent: pkts / proc / permission / err / dead / restarting / no_backend
+// Parent → broker: init / switch / boost / stop (IPC)
+// Broker → parent: proc / permission / err / dead / restarting / no_backend (IPC),
+//                  plus one socket connection per capture instance (pcap data)
 
-import * as os from 'os';
+import net from 'net';
 import type { ChildProcess } from 'child_process';
-import { startCapture, type CaptureBackend, type RawPacket } from './capture';
+import { startRawCapture, type CaptureBackend } from './capture';
 import { startProcessPolling, noteLookupMiss, type ProcEntry } from './process-names';
 
 export type BrokerOut =
-  | { t: 'pkts'; pkts: RawPacket[] }
   | { t: 'proc'; entries: [string, ProcEntry][] }
   | { t: 'permission' }
   | { t: 'err'; msg: string }
@@ -25,47 +24,32 @@ export type BrokerOut =
   | { t: 'no_backend' };
 
 export type BrokerIn =
-  | { t: 'init'; backend: CaptureBackend; iface: string }
+  | { t: 'init'; backend: CaptureBackend; iface: string; sockPath: string; nonce: string }
   | { t: 'switch'; iface: string }
   | { t: 'boost' } // parent saw an unattributed flow — poll lsof faster
   | { t: 'stop' };
 
 const send = (m: BrokerOut) => process.send?.(m);
 
-function localIps(): Set<string> {
-  const set = new Set<string>();
-  for (const addrs of Object.values(os.networkInterfaces())) {
-    for (const a of addrs ?? []) set.add(a.address);
-  }
-  return set;
-}
-
 let backend: CaptureBackend = 'tshark';
 let iface = 'en0';
+let sockPath = '';
+let nonce = '';
+let initialized = false;
+
+// The parent drops to the user right after forking us, so after 'init' its
+// messages are untrusted input to a root process: init is accepted once (sent
+// before the drop), the tcpdump -Z user comes from our own sudo env, and
+// interface names are checked on every switch.
+const IFACE_RE = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$/;
+const BACKENDS: ReadonlySet<string> = new Set(['tshark', 'tcpdump', 'pcap']);
+const dropUser = process.env.SUDO_USER ?? '';
+const dropUserOk = /^[a-z_][a-z0-9_.-]*$/i.test(dropUser) && dropUser !== 'root';
 let proc: ChildProcess | null = null;
 let shuttingDown = false;
 let permissionDenied = false;
 let restartCount = 0;
 let lastRestart = 0;
-
-// Batch packets so IPC isn't one round-trip per packet.
-let batch: RawPacket[] = [];
-let flushTimer: ReturnType<typeof setTimeout> | null = null;
-function flush(): void {
-  if (flushTimer) {
-    clearTimeout(flushTimer);
-    flushTimer = null;
-  }
-  if (batch.length) {
-    send({ t: 'pkts', pkts: batch });
-    batch = [];
-  }
-}
-function queue(p: RawPacket): void {
-  batch.push(p);
-  if (batch.length >= 200) flush();
-  else if (!flushTimer) flushTimer = setTimeout(flush, 40);
-}
 
 function onErr(msg: string): void {
   if (/permission|denied|bpf|root|operation not permitted/i.test(msg)) {
@@ -80,15 +64,22 @@ function onErr(msg: string): void {
 // interface flap) restarts once; a second death within 30s is declared dead. An
 // intentional kill (switch/stop) is distinguished by proc identity.
 function spawnCapture(): void {
-  const p = startCapture(backend, iface, localIps(), queue, onErr);
+  const p = startRawCapture(backend, iface, dropUser, onErr);
   proc = p;
   if (!p) {
     send({ t: 'no_backend' });
     return;
   }
+  const conn = net.createConnection(sockPath, () => {
+    conn.write(`${nonce}\n`);
+    p.stdout!.pipe(conn);
+  });
+  conn.on('error', (e) => {
+    onErr(`capture stream: ${e.message}`);
+    p.kill();
+  });
   p.on('exit', () => {
     if (p !== proc || shuttingDown || permissionDenied) return;
-    flush();
     const now = Date.now();
     const recent = now - lastRestart < 30_000;
     if (recent && restartCount >= 1) {
@@ -106,18 +97,30 @@ function spawnCapture(): void {
 
 function stop(): void {
   shuttingDown = true;
-  flush();
   proc?.kill();
   process.exit(0);
 }
 
 process.on('message', (m: BrokerIn) => {
   if (m.t === 'init') {
+    if (initialized) return;
+    if (!BACKENDS.has(m.backend) || !IFACE_RE.test(m.iface) || typeof m.sockPath !== 'string' || typeof m.nonce !== 'string') {
+      onErr('broker: invalid init');
+      return;
+    }
+    if (m.backend === 'tcpdump' && !dropUserOk) {
+      onErr('broker: no non-root SUDO_USER for tcpdump -Z — refusing to dissect as root');
+      return;
+    }
+    initialized = true;
     backend = m.backend;
     iface = m.iface;
+    sockPath = m.sockPath;
+    nonce = m.nonce;
     spawnCapture();
     startProcessPolling((entries) => send({ t: 'proc', entries }));
   } else if (m.t === 'switch') {
+    if (!initialized || !IFACE_RE.test(m.iface)) return;
     iface = m.iface;
     permissionDenied = false;
     restartCount = 0;

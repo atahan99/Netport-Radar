@@ -10,11 +10,11 @@
 
 import { execSync, fork, type ChildProcess } from 'child_process';
 import * as os from 'os';
-import http from 'http';
 import net from 'net';
 import { lookup } from 'dns/promises';
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs';
-import { join, extname } from 'path';
+import { writeFileSync, mkdirSync, mkdtempSync, chownSync, rmSync, existsSync, statSync } from 'fs';
+import { randomBytes } from 'crypto';
+import { join } from 'path';
 import type { BackendInfo, HomeAirport } from '../src/types';
 import {
   detectBackend,
@@ -22,10 +22,15 @@ import {
   geoLookup,
   haversineKm,
   startCapture,
+  startDecoder,
   type CaptureBackend,
+  type RawPacket,
+  type Decoder,
 } from './capture';
 import { FlowTracker } from './flow-tracker';
 import { WsHub } from './ws';
+import { serveDist } from './static';
+import { startPcapReceiver } from './pcap-socket';
 import { logEvent, exportNdjson, resetLog } from './logger';
 import {
   startProcessPolling,
@@ -151,42 +156,6 @@ async function resolvePrimaryHome(): Promise<HomeAirport> {
   return { id: 'primary', label: 'Local', lat: 0, lng: 0, ip: '', isVpn: false };
 }
 
-const MIME: Record<string, string> = {
-  '.html': 'text/html',
-  '.js': 'text/javascript',
-  '.css': 'text/css',
-  '.json': 'application/json',
-  '.svg': 'image/svg+xml',
-  '.png': 'image/png',
-  '.jpg': 'image/jpeg',
-  '.ico': 'image/x-icon',
-};
-
-function serveDist(): void {
-  const dir = join(import.meta.dirname, '..', 'dist');
-  if (!existsSync(dir)) {
-    console.warn('[serve] dist/ not found — run `npm run build` first');
-    return;
-  }
-  http
-    .createServer((req, res) => {
-      const rel = (req.url ?? '/').split('?')[0];
-      let file = join(dir, rel);
-      if (!existsSync(file) || rel === '/' || rel.endsWith('/')) file = join(dir, 'index.html');
-      try {
-        const data = readFileSync(file);
-        res.setHeader('Content-Type', MIME[extname(file)] ?? 'application/octet-stream');
-        res.end(data);
-      } catch {
-        res.statusCode = 404;
-        res.end('not found');
-      }
-    })
-    .listen(HTTP_PORT, BIND_HOST, () =>
-      console.log(`[serve] dist on http://localhost:${HTTP_PORT} (bound ${BIND_HOST})`),
-    );
-}
-
 function openBrowser(url: string): void {
   const cmd =
     process.platform === 'darwin' ? 'open' : process.platform === 'win32' ? 'start' : 'xdg-open';
@@ -234,7 +203,12 @@ function lanIp(): string | null {
 // a small broker child and drop the main process to the invoking user. If we
 // can't (not root, not via sudo, Windows, or opted out), everything runs inline
 // exactly as before — no behavior change.
-function resolveDropTarget(): { uid: number; gid: number } | null {
+interface DropTarget {
+  uid: number;
+  gid: number;
+}
+
+function resolveDropTarget(): DropTarget | null {
   if (process.env.NETPORT_NO_PRIVDROP) return null;
   if (process.platform === 'win32') return null;
   if (typeof process.getuid !== 'function' || process.getuid() !== 0) return null;
@@ -245,7 +219,7 @@ function resolveDropTarget(): { uid: number; gid: number } | null {
   return { uid, gid };
 }
 
-function dropPrivileges(target: { uid: number; gid: number }): void {
+function dropPrivileges(target: DropTarget): void {
   try {
     process.setgid?.(target.gid);
     try {
@@ -254,29 +228,29 @@ function dropPrivileges(target: { uid: number; gid: number }): void {
       /* non-fatal on some platforms */
     }
     process.setuid?.(target.uid); // must be last — can't change gid after
+    // sudo may leave HOME=/root; decoders (tshark prefs) need the user's own.
+    const me = os.userInfo();
+    process.env.HOME = me.homedir;
+    process.env.USER = me.username;
     console.log(
       `[security] dropped to uid=${target.uid} gid=${target.gid}; capture runs in the root broker.`,
     );
   } catch (e) {
-    // The broker is already forked; if the drop fails we keep running as before
-    // (servers root) rather than aborting — no worse than the pre-change state.
-    console.error('[security] privilege drop failed — continuing as root:', e);
+    // Fail closed: the network-facing servers must never keep running as root.
+    // Exiting also stops the broker (it exits when the IPC channel closes).
+    console.error('[security] privilege drop failed — refusing to run the servers as root:', e);
+    console.error('[security] fix sudo (SUDO_UID/GID/USER) or opt out with NETPORT_NO_PRIVDROP=1.');
+    process.exit(1);
   }
 }
 
-function assertPrivilegesDropped(brokered: boolean, wsHub: WsHub): void {
+function assertPrivilegesDropped(brokered: boolean): void {
   if (typeof process.getuid !== 'function') return;
   const uid = process.getuid();
   console.log(`[security] effective uid=${uid}${brokered ? ' (brokered; capture in root child)' : ''}`);
-  if (!brokered) return;
-  if (uid === 0) {
-    console.error(
-      '[security] brokered run still executing as root after dropPrivileges — WS/HTTP must not stay root.',
-    );
-    wsHub.error(
-      'privilege_drop_failed',
-      'Server still running as root after privilege drop — fix sudo (SUDO_UID/GID) or use NETPORT_NO_PRIVDROP=1 intentionally.',
-    );
+  if (brokered && uid === 0) {
+    console.error('[security] still root after the privilege drop — exiting.');
+    process.exit(1);
   }
 }
 
@@ -385,6 +359,12 @@ async function main(): Promise<void> {
     onProcessMiss,
   });
 
+  // Packets flowing again means capture recovered from any earlier error.
+  const ingest = (p: RawPacket) => {
+    ws.clearError();
+    tracker.ingest(p);
+  };
+
   const refreshHome = () =>
     void resolvePrimaryHome().then((home) => {
       primaryHome = home;
@@ -426,7 +406,7 @@ async function main(): Promise<void> {
     // restarted once; a second death within 30s is declared dead. An intentional
     // kill (switch/shutdown) is distinguished by proc identity.
     function spawnCapture(): void {
-      const proc = startCapture(backend, iface, getLocalIps(), (p) => tracker.ingest(p), onCaptureError);
+      const proc = startCapture(backend, iface, getLocalIps(), ingest, onCaptureError);
       captureProc = proc;
       if (!proc) {
         ws.error('no_backend', 'No capture backend available — install Wireshark (tshark).');
@@ -466,15 +446,26 @@ async function main(): Promise<void> {
 
   // Brokered path: fork the root broker, wire its IPC into the tracker/WS, then
   // drop this process to the invoking user. The broker owns tshark + lsof.
-  function startBrokeredCapture(target: { uid: number; gid: number }): CaptureControl {
+  async function startBrokeredCapture(target: DropTarget): Promise<CaptureControl> {
+    // Still root here. The pcap socket lives in a fresh 0700 dir handed to the
+    // invoking user, so after the drop only we (and root) can reach it.
+    const sockDir = mkdtempSync(join(os.tmpdir(), 'netport-'));
+    chownSync(sockDir, target.uid, target.gid);
+    const sockPath = join(sockDir, 'pcap.sock');
+    const nonce = randomBytes(16).toString('hex');
+    let decoder: Decoder | null = null;
+    const pcapServer = await startPcapReceiver(sockPath, nonce, (sock) => {
+      decoder?.stop(); // a new capture instance (restart / iface switch) replaces the old stream
+      decoder = startDecoder(backend, sock, getLocalIps(), ingest, (msg) =>
+        ws.error('capture_error', msg.slice(0, 200)),
+      );
+    });
+
     const broker = fork(join(import.meta.dirname, 'priv-broker.ts'), [], {
       stdio: ['inherit', 'inherit', 'inherit', 'ipc'],
     });
     broker.on('message', (m: BrokerOut) => {
       switch (m.t) {
-        case 'pkts':
-          for (const p of m.pkts) tracker.ingest(p);
-          break;
         case 'proc':
           setProcessTable(m.entries);
           break;
@@ -505,24 +496,27 @@ async function main(): Promise<void> {
         /* broker gone */
       }
     };
-    sendBroker({ t: 'init', backend, iface });
+    sendBroker({ t: 'init', backend, iface, sockPath, nonce });
     sendProcessBoost = () => sendBroker({ t: 'boost' }); // the broker owns lsof
     dropPrivileges(target); // everything below this line runs as the invoking user
-    assertPrivilegesDropped(true, ws);
+    assertPrivilegesDropped(true);
     return {
       switchTo: (next) => sendBroker({ t: 'switch', iface: next }),
       stop: () => {
         sendBroker({ t: 'stop' });
         broker.kill();
+        decoder?.stop();
+        pcapServer.close();
+        rmSync(sockDir, { recursive: true, force: true });
       },
     };
   }
 
   const dropTarget = resolveDropTarget();
   const capture: CaptureControl = dropTarget
-    ? startBrokeredCapture(dropTarget)
+    ? await startBrokeredCapture(dropTarget)
     : startInlineCapture();
-  if (!dropTarget) assertPrivilegesDropped(false, ws);
+  if (!dropTarget) assertPrivilegesDropped(false);
 
   ws.onClient = (msg, reply) => {
     if (msg.type === 'export') {
@@ -542,12 +536,17 @@ async function main(): Promise<void> {
       sourceIpHits.clear();
       refreshHome();
       capture.switchTo(iface);
+      publishHomes(); // re-derive the VPN flag for the new iface before init goes out
       ws.broadcastInit();
     }
   };
 
   if (process.env.SERVE_DIST) {
-    serveDist();
+    const distDir = join(import.meta.dirname, '..', 'dist');
+    serveDist(distDir, HTTP_PORT, BIND_HOST);
+    if (existsSync(distDir) && statSync(distDir).uid === 0 && process.getuid?.() !== 0) {
+      console.warn('[serve] dist/ is owned by root (built under sudo). Fix: sudo chown -R "$USER" dist');
+    }
     // Local open works on any bind; the token rides the URL so the page can
     // hand it to the WS (only set for non-local binds).
     openBrowser(`http://localhost:${HTTP_PORT}${TOKEN ? `/?token=${TOKEN}` : ''}`);
@@ -563,16 +562,15 @@ async function main(): Promise<void> {
     capture.stop();
     tracker.stop();
     ws.stop();
-    // Flush the session log to disk (the master plan promised this on clean close).
-    const ndjson = exportNdjson();
-    if (ndjson) {
-      // Keep session logs out of the repo root: write under plans/session-logs/
-      // (gitignored). Created on demand.
-      const dir = join(process.cwd(), 'plans', 'session-logs');
-      const file = join(dir, `netport-radar-${new Date().toISOString().replace(/[:.]/g, '-')}.ndjson`);
+    // Opt-in: the log is a full record of who you talked to, so it only hits
+    // disk when NETPORT_SESSION_LOG names a directory.
+    const logDir = process.env.NETPORT_SESSION_LOG;
+    const ndjson = logDir ? exportNdjson() : '';
+    if (logDir && ndjson) {
+      const file = join(logDir, `netport-radar-${new Date().toISOString().replace(/[:.]/g, '-')}.ndjson`);
       try {
-        mkdirSync(dir, { recursive: true });
-        writeFileSync(file, ndjson + '\n');
+        mkdirSync(logDir, { recursive: true, mode: 0o700 });
+        writeFileSync(file, ndjson + '\n', { mode: 0o600 });
         console.log(`\n[log] session written to ${file}`);
       } catch (e) {
         console.error('[log] failed to write session log:', e);

@@ -5,12 +5,18 @@
 
 import { spawn, execSync, type ChildProcess } from 'child_process';
 import { existsSync } from 'fs';
+import { dirname, join } from 'path';
+import type { Readable } from 'stream';
 import * as os from 'os';
 import * as dns from 'dns/promises';
 import geoip from 'geoip-lite';
 import { open as openMmdb, type Reader, type CityResponse, type AsnResponse } from 'maxmind';
 import { LRUCache } from 'lru-cache';
 import type { DetectedProtocol, HomeAirport } from '../src/types';
+import { WS_PORT } from './config';
+
+// Our own WS feed must never be captured as traffic.
+const CAPTURE_FILTER = `not port ${WS_PORT}`;
 
 export type CaptureBackend = 'tshark' | 'tcpdump' | 'pcap';
 
@@ -41,6 +47,12 @@ export function tsharkPath(): string {
   }
   if (existsSync(APP_TSHARK)) return APP_TSHARK;
   return 'tshark';
+}
+
+// dumpcap ships next to tshark (Wireshark's capture-only helper, no dissectors).
+export function dumpcapPath(): string {
+  const t = tsharkPath();
+  return t === 'tshark' ? 'dumpcap' : join(dirname(t), 'dumpcap');
 }
 
 // ── Backend auto-detect ────────────────────────────────────────────────────
@@ -86,43 +98,79 @@ const TSHARK_FIELDS = [
   'tcp.flags.reset',
 ];
 
+const TSHARK_OUTPUT_ARGS = [
+  '-l',
+  '-n',
+  '-T', 'fields',
+  '-E', 'separator=\t',
+  '-E', 'occurrence=f',
+  ...TSHARK_FIELDS.flatMap((f) => ['-e', f]),
+];
+const TSHARK_ERR = /error|permission|denied|couldn't|failed/i;
+const TCPDUMP_ERR = /error|permission|denied/i;
+
+// Turn a text stream (decoder stdout) into RawPackets, one per line.
+function readLines(
+  stream: Readable,
+  parse: (line: string, localIps: Set<string>) => RawPacket | null,
+  localIps: Set<string>,
+  onPacket: (p: RawPacket) => void,
+): void {
+  stream.setEncoding('utf8'); // decode across chunk boundaries (multibyte SNI)
+  let buffer = '';
+  stream.on('data', (chunk: string) => {
+    buffer += chunk;
+    let nl: number;
+    while ((nl = buffer.indexOf('\n')) >= 0) {
+      const line = buffer.slice(0, nl);
+      buffer = buffer.slice(nl + 1);
+      const pkt = parse(line, localIps);
+      if (pkt) onPacket(pkt);
+    }
+  });
+  stream.resume(); // the broker's socket arrives paused; a 'data' listener alone won't start it
+}
+
+function watchStderr(proc: ChildProcess, errRe: RegExp, onError: (msg: string) => void): void {
+  proc.stderr!.on('data', (d: Buffer) => {
+    const msg = d.toString();
+    if (errRe.test(msg)) onError(msg.trim());
+  });
+  proc.on('error', (e) => onError(String(e)));
+}
+
+// Spawn a capture/decoder process whose stdout is one packet per line. When
+// `input` is given it is piped to stdin (pcap stream from the root broker).
+function spawnLineReader(
+  cmd: string,
+  args: string[],
+  parse: (line: string, localIps: Set<string>) => RawPacket | null,
+  errRe: RegExp,
+  localIps: Set<string>,
+  onPacket: (p: RawPacket) => void,
+  onError: (msg: string) => void,
+  input?: Readable,
+): ChildProcess {
+  const proc = spawn(cmd, args, { stdio: [input ? 'pipe' : 'ignore', 'pipe', 'pipe'] });
+  if (input && proc.stdin) {
+    proc.stdin.on('error', () => {}); // decoder exited first (EPIPE) — its exit is reported
+    input.on('error', () => proc.kill());
+    input.pipe(proc.stdin);
+  }
+  readLines(proc.stdout!, parse, localIps, onPacket);
+  watchStderr(proc, errRe, onError);
+  return proc;
+}
+
+// Inline mode: tshark captures and dissects in one process.
 export function startTshark(
   iface: string,
   localIps: Set<string>,
   onPacket: (p: RawPacket) => void,
   onError: (msg: string) => void,
 ): ChildProcess {
-  const args = [
-    '-i', iface,
-    '-l',
-    '-n',
-    '--no-promiscuous-mode',
-    '-f', 'not port 8090',
-    '-T', 'fields',
-    '-E', 'separator=\t',
-    '-E', 'occurrence=f',
-    ...TSHARK_FIELDS.flatMap((f) => ['-e', f]),
-  ];
-  const proc = spawn(tsharkPath(), args);
-  let buffer = '';
-
-  proc.stdout.on('data', (chunk: Buffer) => {
-    buffer += chunk.toString();
-    let nl: number;
-    while ((nl = buffer.indexOf('\n')) >= 0) {
-      const line = buffer.slice(0, nl);
-      buffer = buffer.slice(nl + 1);
-      const pkt = parseTsharkLine(line, localIps);
-      if (pkt) onPacket(pkt);
-    }
-  });
-
-  proc.stderr.on('data', (d: Buffer) => {
-    const msg = d.toString();
-    if (/error|permission|denied|couldn't|failed/i.test(msg)) onError(msg.trim());
-  });
-  proc.on('error', (e) => onError(String(e)));
-  return proc;
+  const args = ['-i', iface, '--no-promiscuous-mode', '-f', CAPTURE_FILTER, ...TSHARK_OUTPUT_ARGS];
+  return spawnLineReader(tsharkPath(), args, parseTsharkLine, TSHARK_ERR, localIps, onPacket, onError);
 }
 
 export function parseTsharkLine(line: string, localIps: Set<string>): RawPacket | null {
@@ -214,26 +262,9 @@ export function startTcpdump(
   onError: (msg: string) => void,
 ): ChildProcess {
   // No -q: we need the "Flags [F./R.]" field to detect connection close
-  // (descent/landed). -q suppressed it, so closes only fired via the 120s
-  // stale timer.
-  const proc = spawn('tcpdump', ['-i', iface, '-l', '-n', '-t', '-U', 'not port 8090']);
-  let buffer = '';
-  proc.stdout.on('data', (chunk: Buffer) => {
-    buffer += chunk.toString();
-    let nl: number;
-    while ((nl = buffer.indexOf('\n')) >= 0) {
-      const line = buffer.slice(0, nl);
-      buffer = buffer.slice(nl + 1);
-      const pkt = parseTcpdumpLine(line, localIps);
-      if (pkt) onPacket(pkt);
-    }
-  });
-  proc.stderr.on('data', (d: Buffer) => {
-    const msg = d.toString();
-    if (/error|permission|denied/i.test(msg)) onError(msg.trim());
-  });
-  proc.on('error', (e) => onError(String(e)));
-  return proc;
+  // (descent/landed); without it closes only fire via the 120s stale timer.
+  const args = ['-i', iface, '-l', '-n', '-t', '-U', CAPTURE_FILTER];
+  return spawnLineReader('tcpdump', args, parseTcpdumpLine, TCPDUMP_ERR, localIps, onPacket, onError);
 }
 
 // "1.2.3.4.443" → {ip:1.2.3.4, port:443}; "2001:db8::1.443" → {ip:2001:db8::1,
@@ -447,4 +478,63 @@ export function haversineKm(lat1: number, lng1: number, lat2: number, lng2: numb
     Math.sin(dLat / 2) ** 2 +
     Math.cos((lat1 * Math.PI) / 180) * Math.cos((lat2 * Math.PI) / 180) * Math.sin(dLng / 2) ** 2;
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+// ── Privilege-split capture ────────────────────────────────────────────────
+// Brokered mode keeps packet parsing out of root. The root broker only opens the
+// capture device; whatever parses hostile traffic runs as the invoking user:
+//   tshark backend:  root dumpcap writes raw pcap → the parent runs tshark on it
+//   tcpdump backend: tcpdump -Z <user> opens BPF as root, then drops to the user
+//                    before dissecting (macOS libpcap can't read pcap from a
+//                    pipe, so the parent just parses its text output).
+
+export function startRawCapture(
+  backend: CaptureBackend,
+  iface: string,
+  dropUser: string,
+  onError: (msg: string) => void,
+): ChildProcess | null {
+  let proc: ChildProcess;
+  if (backend === 'tshark') {
+    proc = spawn(dumpcapPath(), ['-i', iface, '-p', '-f', CAPTURE_FILTER, '-F', 'pcap', '-q', '-w', '-'], {
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    watchStderr(proc, TSHARK_ERR, onError);
+  } else if (backend === 'tcpdump') {
+    proc = spawn('tcpdump', ['-i', iface, '-Z', dropUser, '-l', '-n', '-t', '-U', CAPTURE_FILTER], {
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    watchStderr(proc, TCPDUMP_ERR, onError);
+  } else {
+    onError('node-pcap backend not implemented — install Wireshark (tshark) or use tcpdump');
+    return null;
+  }
+  return proc;
+}
+
+export interface Decoder {
+  stop(): void;
+}
+
+export function startDecoder(
+  backend: CaptureBackend,
+  input: Readable & { destroy(): void },
+  localIps: Set<string>,
+  onPacket: (p: RawPacket) => void,
+  onError: (msg: string) => void,
+): Decoder {
+  if (backend === 'tcpdump') {
+    readLines(input, parseTcpdumpLine, localIps, onPacket); // already text
+    return { stop: () => input.destroy() };
+  }
+  // -i - (not -r -): tshark refuses to read a socket as a file; as a live
+  // "interface" it accepts any pcap stream on stdin.
+  const args = ['-i', '-', ...TSHARK_OUTPUT_ARGS];
+  const proc = spawnLineReader(tsharkPath(), args, parseTsharkLine, TSHARK_ERR, localIps, onPacket, onError, input);
+  return {
+    stop: () => {
+      input.destroy();
+      proc.kill();
+    },
+  };
 }
