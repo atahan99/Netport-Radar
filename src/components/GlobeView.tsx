@@ -10,6 +10,7 @@ import {
   globeBorderColor,
   useVectorPolygons,
   polygonStrokeColor,
+  borderAlphaForAltitude,
   rgba,
 } from '@/lib/globe-color';
 import { globeMaterialFor } from '@/lib/globe-material';
@@ -31,6 +32,7 @@ import {
   ringLat,
   ringLng,
   ringColor,
+  ringRepeatPeriod,
   labelText,
   labelColor,
   pointLat,
@@ -143,7 +145,15 @@ export default function GlobeView() {
   // every render. Caps are transparent (the terrain comes from the shader
   // material); polygons contribute crisp themed border strokes only.
   const borderColor = globeBorderColor(theme);
-  const polygonStrokeColorFn = useCallback(() => polygonStrokeColor(borderColor), [borderColor]);
+  const [borderAlpha, setBorderAlpha] = useState(() => borderAlphaForAltitude(DEFAULT_ALT));
+  const polygonStrokeColorFn = useCallback(
+    () => polygonStrokeColor(borderColor, borderAlpha),
+    [borderColor, borderAlpha],
+  );
+  // Bucketed, so this only re-renders when the fade visibly changes.
+  const onZoom = useCallback((pov: { altitude: number }) => {
+    setBorderAlpha(borderAlphaForAltitude(pov.altitude));
+  }, []);
   const polygonsData = useVectorPolygons(theme) ? countries : NO_POLYGONS;
 
   useEffect(() => {
@@ -450,7 +460,7 @@ export default function GlobeView() {
         height={size.h}
         globeImageUrl={null}
         globeMaterial={globeMaterial}
-        backgroundImageUrl="/textures/night-sky.png"
+        backgroundImageUrl="/textures/night-sky-dim.jpg" /* dimmed so planes, not stars, catch the eye */
         backgroundColor="#000000"
         atmosphereColor={theme.atmosphere}
         atmosphereAltitude={theme.atmosphereAlt ?? 0.16}
@@ -461,6 +471,7 @@ export default function GlobeView() {
         polygonStrokeColor={polygonStrokeColorFn}
         polygonAltitude={0.006}
         polygonsTransitionDuration={0}
+        onZoom={onZoom}
         onGlobeReady={onGlobeReady}
         /* trails (throttled) — VPN dashed */
         pathsData={trailData}
@@ -478,7 +489,7 @@ export default function GlobeView() {
         ringColor={ringColor}
         ringMaxRadius={3}
         ringPropagationSpeed={2}
-        ringRepeatPeriod={900}
+        ringRepeatPeriod={ringRepeatPeriod}
         labelsData={homeAirports}
         labelLat={ringLat}
         labelLng={ringLng}

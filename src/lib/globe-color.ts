@@ -40,8 +40,17 @@ export function polygonSideColor(): string {
   return 'rgba(0,0,0,0)';
 }
 
-export function polygonStrokeColor(borderColor: string): string {
-  return borderColor;
+// Border strokes fade as the camera pulls back: thin near-white lines over a
+// whole hemisphere read as noise.
+export function polygonStrokeColor(borderColor: string, alpha = 1): string {
+  return alpha >= 1 || !borderColor.startsWith('#') ? borderColor : rgba(borderColor, alpha);
+}
+
+// Altitude (camera distance in globe radii) → border alpha, bucketed so the
+// polygon layer only recolors on visible steps.
+export function borderAlphaForAltitude(altitude: number): number {
+  const a = Math.min(1, Math.max(0.25, 1.35 - 0.35 * altitude));
+  return Math.round(a * 4) / 4;
 }
 
 /** Home-airport ring color factory (VPN = purple, else white). */

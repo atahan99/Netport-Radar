@@ -77,3 +77,18 @@ describe('pathGradientColors', () => {
     expect(colors[4]).toBe('rgba(255,0,0,0.900)');
   });
 });
+
+describe('border fade', () => {
+  it('applies alpha to hex borders and leaves full opacity untouched', async () => {
+    const { polygonStrokeColor } = await import('../src/lib/globe-color');
+    expect(polygonStrokeColor('#474c57', 1)).toBe('#474c57');
+    expect(polygonStrokeColor('#474c57', 0.5)).toBe('rgba(71,76,87,0.500)');
+  });
+  it('fades with camera altitude in quarter steps', async () => {
+    const { borderAlphaForAltitude } = await import('../src/lib/globe-color');
+    expect(borderAlphaForAltitude(1)).toBe(1);
+    expect(borderAlphaForAltitude(1.7)).toBe(0.75);
+    expect(borderAlphaForAltitude(3.5)).toBe(0.25);
+    expect(borderAlphaForAltitude(10)).toBe(0.25);
+  });
+});

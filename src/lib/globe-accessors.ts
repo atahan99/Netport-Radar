@@ -33,6 +33,8 @@ export const pathStroke = (d: object) => {
 
 export const ringLat = (d: object) => (d as HomeAirport).lat;
 export const ringLng = (d: object) => (d as HomeAirport).lng;
+// Home rings pulse slowly; the selected flight's destination beacon faster.
+export const ringRepeatPeriod = (d: object) => ((d as { id?: string }).id === '__dest' ? 900 : 2400);
 export const ringColor = (d: object) => () =>
   (d as { __color?: string }).__color ?? homeRingColor((d as HomeAirport).isVpn);
 
