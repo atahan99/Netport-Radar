@@ -206,7 +206,6 @@ function lanIp(): string | null {
 interface DropTarget {
   uid: number;
   gid: number;
-  user: string; // for tcpdump -Z
 }
 
 function resolveDropTarget(): DropTarget | null {
@@ -215,11 +214,9 @@ function resolveDropTarget(): DropTarget | null {
   if (typeof process.getuid !== 'function' || process.getuid() !== 0) return null;
   const uid = Number(process.env.SUDO_UID);
   const gid = Number(process.env.SUDO_GID);
-  const user = process.env.SUDO_USER ?? '';
-  // Need a real non-root target (sudo from a normal user sets SUDO_UID/GID/USER).
+  // Need a real non-root target (sudo from a normal user sets SUDO_UID/GID).
   if (!Number.isInteger(uid) || uid <= 0 || !Number.isInteger(gid) || gid < 0) return null;
-  if (!/^[a-z_][a-z0-9_.-]*$/i.test(user) || user === 'root') return null;
-  return { uid, gid, user };
+  return { uid, gid };
 }
 
 function dropPrivileges(target: DropTarget): void {
@@ -499,7 +496,7 @@ async function main(): Promise<void> {
         /* broker gone */
       }
     };
-    sendBroker({ t: 'init', backend, iface, sockPath, nonce, dropUser: target.user });
+    sendBroker({ t: 'init', backend, iface, sockPath, nonce });
     sendProcessBoost = () => sendBroker({ t: 'boost' }); // the broker owns lsof
     dropPrivileges(target); // everything below this line runs as the invoking user
     assertPrivilegesDropped(true);

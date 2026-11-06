@@ -24,7 +24,7 @@ export type BrokerOut =
   | { t: 'no_backend' };
 
 export type BrokerIn =
-  | { t: 'init'; backend: CaptureBackend; iface: string; sockPath: string; nonce: string; dropUser: string }
+  | { t: 'init'; backend: CaptureBackend; iface: string; sockPath: string; nonce: string }
   | { t: 'switch'; iface: string }
   | { t: 'boost' } // parent saw an unattributed flow — poll lsof faster
   | { t: 'stop' };
@@ -35,7 +35,16 @@ let backend: CaptureBackend = 'tshark';
 let iface = 'en0';
 let sockPath = '';
 let nonce = '';
-let dropUser = '';
+let initialized = false;
+
+// The parent drops to the user right after forking us, so after 'init' its
+// messages are untrusted input to a root process: init is accepted once (sent
+// before the drop), the tcpdump -Z user comes from our own sudo env, and
+// interface names are checked on every switch.
+const IFACE_RE = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$/;
+const BACKENDS: ReadonlySet<string> = new Set(['tshark', 'tcpdump', 'pcap']);
+const dropUser = process.env.SUDO_USER ?? '';
+const dropUserOk = /^[a-z_][a-z0-9_.-]*$/i.test(dropUser) && dropUser !== 'root';
 let proc: ChildProcess | null = null;
 let shuttingDown = false;
 let permissionDenied = false;
@@ -94,14 +103,24 @@ function stop(): void {
 
 process.on('message', (m: BrokerIn) => {
   if (m.t === 'init') {
+    if (initialized) return;
+    if (!BACKENDS.has(m.backend) || !IFACE_RE.test(m.iface) || typeof m.sockPath !== 'string' || typeof m.nonce !== 'string') {
+      onErr('broker: invalid init');
+      return;
+    }
+    if (m.backend === 'tcpdump' && !dropUserOk) {
+      onErr('broker: no non-root SUDO_USER for tcpdump -Z — refusing to dissect as root');
+      return;
+    }
+    initialized = true;
     backend = m.backend;
     iface = m.iface;
     sockPath = m.sockPath;
     nonce = m.nonce;
-    dropUser = m.dropUser;
     spawnCapture();
     startProcessPolling((entries) => send({ t: 'proc', entries }));
   } else if (m.t === 'switch') {
+    if (!initialized || !IFACE_RE.test(m.iface)) return;
     iface = m.iface;
     permissionDenied = false;
     restartCount = 0;
