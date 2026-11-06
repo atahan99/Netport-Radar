@@ -86,4 +86,11 @@ describe('superviseCapture', () => {
     });
     expect(calls).toEqual(['noBackend']);
   });
+
+  it('treats only real permission failures as permission errors', () => {
+    const { errs, calls } = setup();
+    errs[0]('tcpdump: syntax error in filter expression: bpf compile failed');
+    errs[0]('dumpcap: The capture session could not be initiated (Operation not permitted)');
+    expect(calls).toEqual(['error:tcpdump: syntax error in filter expression: bpf compile failed', 'permission']);
+  });
 });

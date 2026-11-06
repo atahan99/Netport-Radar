@@ -73,7 +73,7 @@ known limits.
 
 ### Self-noise
 
-The geolocation hosts (`ipapi.co`, `ip-api.com`, `api.ipify.org`) are resolved at
+The geolocation hosts (`ipapi.co`, `api.ipify.org`) are resolved at
 boot into `selfProbeIps` and never become flights. The flow tracker also drops
 loopback, multicast, and `*.in-addr.arpa` / `*.ip6.arpa` PTR lookups.
 

@@ -14,6 +14,7 @@ import net from 'net';
 import type { ChildProcess } from 'child_process';
 import { startRawCapture, type CaptureBackend } from './capture';
 import { superviseCapture } from './capture-supervisor';
+import { IFACE_RE, validateBrokerInit } from './broker-protocol';
 import { startProcessPolling, noteLookupMiss, type ProcEntry } from './process-names';
 
 export type BrokerOut =
@@ -43,8 +44,6 @@ let sup: ReturnType<typeof superviseCapture> | null = null;
 // messages are untrusted input to a root process: init is accepted once (sent
 // before the drop), the tcpdump -Z user comes from our own sudo env, and
 // interface names are checked on every switch.
-const IFACE_RE = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$/;
-const BACKENDS: ReadonlySet<string> = new Set(['tshark', 'tcpdump', 'pcap']);
 const dropUser = process.env.SUDO_USER ?? '';
 const dropUserOk = /^[a-z_][a-z0-9_.-]*$/i.test(dropUser) && dropUser !== 'root';
 
@@ -84,16 +83,15 @@ function stop(): void {
 
 process.on('message', (m: BrokerIn) => {
   if (m.t === 'init') {
+    // One attempt only, valid or not: a rejected init must not be retryable by
+    // a (possibly compromised) parent after it has dropped privileges.
     if (initialized) return;
-    if (!BACKENDS.has(m.backend) || !IFACE_RE.test(m.iface) || typeof m.sockPath !== 'string' || typeof m.nonce !== 'string') {
-      send({ t: 'err', msg: 'broker: invalid init' });
-      return;
-    }
-    if (m.backend === 'tcpdump' && !dropUserOk) {
-      send({ t: 'err', msg: 'broker: no non-root SUDO_USER for tcpdump -Z — refusing to dissect as root' });
-      return;
-    }
     initialized = true;
+    const problem = validateBrokerInit(m, dropUserOk);
+    if (problem) {
+      send({ t: 'err', msg: `broker: ${problem}` });
+      return;
+    }
     backend = m.backend;
     iface = m.iface;
     sockPath = m.sockPath;

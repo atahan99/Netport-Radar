@@ -1,14 +1,14 @@
 // server/home.ts
 // Where the "home airport" sits. Behind NAT the captured source IP is private,
 // so the primary home comes from ONE lookup of the public IP's location per
-// session: ipapi.co (HTTPS) → ip-api.com (HTTP-only free tier) → ipify plus the
-// local GeoIP database. NETPORT_HOME_LAT/LNG(/LABEL) skips the lookup entirely.
+// session: ipapi.co, then ipify plus the local GeoIP database, both over HTTPS.
+// NETPORT_HOME_LAT/LNG(/LABEL) skips the lookup entirely.
 
 import type { HomeAirport } from '../src/types';
 import { geoLookup } from './capture';
 
 // Hosts contacted by resolvePrimaryHome — their IPs must never become flights.
-export const HOME_PROBE_HOSTS = ['ipapi.co', 'ip-api.com', 'api.ipify.org'];
+export const HOME_PROBE_HOSTS = ['ipapi.co', 'api.ipify.org'];
 
 interface IpapiCoResp {
   latitude: number;
@@ -18,30 +18,22 @@ interface IpapiCoResp {
   ip: string;
 }
 
-interface IpApiResp {
-  status: string;
-  country: string;
-  countryCode: string;
-  city: string;
-  lat: number;
-  lon: number;
-  query: string;
-}
-
-// Home airport from the public IP — still exactly ONE outbound lookup per
-// session, just HTTPS-first now: ipapi.co (HTTPS) → ip-api.com (HTTP-only free
-// tier) → ipify + local geoip-lite (country-accurate). Env override skips all.
 export async function resolvePrimaryHome(): Promise<HomeAirport> {
   const { NETPORT_HOME_LAT, NETPORT_HOME_LNG, NETPORT_HOME_LABEL } = process.env;
-  if (NETPORT_HOME_LAT && NETPORT_HOME_LNG) {
+  const lat = Number(NETPORT_HOME_LAT);
+  const lng = Number(NETPORT_HOME_LNG);
+  if (NETPORT_HOME_LAT && NETPORT_HOME_LNG && Math.abs(lat) <= 90 && Math.abs(lng) <= 180) {
     return {
       id: 'primary',
       label: NETPORT_HOME_LABEL ?? 'Home',
-      lat: Number(NETPORT_HOME_LAT),
-      lng: Number(NETPORT_HOME_LNG),
+      lat,
+      lng,
       ip: '',
       isVpn: false,
     };
+  }
+  if (NETPORT_HOME_LAT || NETPORT_HOME_LNG) {
+    console.warn('[home] NETPORT_HOME_LAT/LNG missing or out of range; looking the location up instead');
   }
   try {
     const r = await fetch('https://ipapi.co/json/', { signal: AbortSignal.timeout(4000) });
@@ -58,25 +50,6 @@ export async function resolvePrimaryHome(): Promise<HomeAirport> {
     }
   } catch {
     /* fall through */
-  }
-  try {
-    const r = await fetch(
-      'http://ip-api.com/json/?fields=status,country,countryCode,city,lat,lon,query',
-      { signal: AbortSignal.timeout(4000) },
-    );
-    const j = (await r.json()) as IpApiResp;
-    if (j.status === 'success') {
-      return {
-        id: 'primary',
-        label: j.city ? `${j.city}, ${j.countryCode}` : j.country,
-        lat: j.lat,
-        lng: j.lon,
-        ip: j.query,
-        isVpn: false,
-      };
-    }
-  } catch {
-    /* fall through to the local DB */
   }
   try {
     const ip = (

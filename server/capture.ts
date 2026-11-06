@@ -49,6 +49,17 @@ export function tsharkPath(): string {
   return 'tshark';
 }
 
+// Absolute path a bare command name resolves to (for the boot log), or the
+// name itself if it can't be resolved (Windows, not installed).
+export function resolvedPath(cmd: string): string {
+  if (cmd.includes('/') || process.platform === 'win32') return cmd;
+  try {
+    return execSync(`command -v ${cmd}`, { encoding: 'utf8' }).trim() || cmd;
+  } catch {
+    return cmd;
+  }
+}
+
 // dumpcap ships next to tshark (Wireshark's capture-only helper, no dissectors).
 export function dumpcapPath(): string {
   const t = tsharkPath();

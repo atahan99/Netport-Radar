@@ -1,4 +1,4 @@
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, afterEach, vi } from 'vitest';
 import { WebSocket } from 'ws';
 import { WsHub, parseClientMessage } from '../server/ws';
 import type { BackendInfo, HomeAirport, ServerMessage } from '../src/types';
@@ -135,5 +135,28 @@ describe('WsHub inbound validation', () => {
     await new Promise((r) => setTimeout(r, 50));
     expect(msgs.map((m) => m.type)).toEqual(['init']);
     ws.close();
+  });
+});
+
+describe('WsHub backpressure and readiness', () => {
+  it('skips a slow client past 1 MB buffered and disconnects it past 8 MB', () => {
+    const { hub } = makeHub(null);
+    const push = (hub as unknown as { push: (ws: unknown, d: string) => void }).push.bind(hub);
+    const mk = (bufferedAmount: number) => ({ readyState: 1, bufferedAmount, send: vi.fn(), terminate: vi.fn() });
+    const fast = mk(0), slow = mk(2 << 20), stuck = mk(9 << 20);
+    push(fast, 'x'); push(slow, 'x'); push(stuck, 'x');
+    expect(fast.send).toHaveBeenCalled();
+    expect(slow.send).not.toHaveBeenCalled();
+    expect(slow.terminate).not.toHaveBeenCalled();
+    expect(stuck.terminate).toHaveBeenCalled();
+  });
+
+  it('refuses connections until marked ready', async () => {
+    const port = portSeq++;
+    const hub = new WsHub(port, () => ({ homeAirports: HOME, backend: BACKEND, flights: [] }), { host: '127.0.0.1', token: null, ready: false });
+    hubs.push(hub);
+    await expect(connect(port)).rejects.toThrow('rejected');
+    hub.markReady();
+    await expect(connect(port)).resolves.toBeDefined();
   });
 });

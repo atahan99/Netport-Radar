@@ -464,7 +464,7 @@ export class FlowTracker {
   // emit a recolor patch.
   private resolveProcess(flow: Flow): boolean {
     if (flow.processResolved) return false;
-    const proc = lookupProcess(flow.flight.srcPort, flow.flight.protocol);
+    const proc = lookupProcess(flow.flight.srcPort, flow.flight.protocol, flow.flight.isIPv6);
     if (!proc) {
       // Young flow with no attribution → boost the lsof cadence. First miss
       // only — re-noting on every tick kept the boost window refreshed forever.
