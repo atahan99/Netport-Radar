@@ -85,6 +85,7 @@ export interface MarkerEntry {
   svg: SVGElement;
   path: SVGPathElement | null;
   last: {
+    type: Flight['aircraftType'];
     heading: number;
     color: string;
     sel: boolean;
@@ -109,6 +110,7 @@ export function makeMarkerEntry(m: maplibregl.Marker, f: Flight): MarkerEntry {
     svg: plane.firstElementChild as SVGElement,
     path: plane.querySelector('path'),
     last: {
+      type: f.aircraftType,
       heading: NaN,
       color: f.liveryColor,
       sel: false,
@@ -131,7 +133,18 @@ export function paintMarker(
   showLabel: boolean,
   pose: Pose,
 ): void {
-  const { plane, label, svg, path, last } = entry;
+  const { plane, label, last } = entry;
+  // Reclassification (e.g. DPI result) swaps the icon: rebuild it and force the
+  // heading + paint writes below onto the new element.
+  if (last.type !== f.aircraftType) {
+    plane.innerHTML = iconSvg(f, AIRCRAFT_SIZE[f.aircraftType]);
+    entry.svg = plane.firstElementChild as SVGElement;
+    entry.path = plane.querySelector('path');
+    last.type = f.aircraftType;
+    last.heading = NaN;
+    last.color = '';
+  }
+  const { svg, path } = entry;
   const hd = markerHeadingDeg(heading);
   if (Math.abs(hd - last.heading) > 0.5 || Number.isNaN(last.heading)) {
     svg.style.transform = `rotate(${hd}deg)`;

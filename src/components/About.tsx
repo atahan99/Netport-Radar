@@ -1,5 +1,6 @@
 import { X } from 'lucide-react';
 import { useFiltersStore } from '@/store/filters';
+import { usePanelFocus } from '@/hooks/usePanelFocus';
 import { APP_NAME, REPO_URL } from '@/config';
 
 // Credits and the repo link. The map keeps one small credit line because its
@@ -25,6 +26,7 @@ function GitHubMark() {
 export default function About() {
   const open = useFiltersStore((s) => s.aboutOpen);
   const setAbout = useFiltersStore((s) => s.setAbout);
+  const panelRef = usePanelFocus<HTMLDivElement>(open);
   if (!open) return null;
   const close = () => setAbout(false);
   const version = import.meta.env.VITE_APP_VERSION as string | undefined;
@@ -33,7 +35,9 @@ export default function About() {
     <>
       <div className="fixed inset-0 z-30" onClick={close} aria-hidden="true" />
       <div
-        className="hud-panel hud-scroll absolute right-4 top-[4.5rem] z-40 max-h-[70vh] w-80 overflow-y-auto rounded-xl border border-zinc-800 bg-black/90 p-3.5 text-xs backdrop-blur-sm max-[640px]:left-4 max-[640px]:w-auto"
+        className="hud-panel hud-scroll absolute outline-none right-4 top-[4.5rem] z-40 max-h-[70vh] w-80 overflow-y-auto rounded-xl border border-zinc-800 bg-black/90 p-3.5 text-xs backdrop-blur-sm max-[640px]:left-4 max-[640px]:w-auto"
+        ref={panelRef}
+        tabIndex={-1}
         role="dialog"
         aria-label={`About ${APP_NAME}`}
       >

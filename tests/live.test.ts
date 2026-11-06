@@ -4,6 +4,7 @@ import { renderHook, cleanup } from '@testing-library/react';
 import { LiveState, isFlight, parseServerMessage } from '../src/lib/live-state';
 import { useLiveFlights, liveReconnect } from '../src/lib/live';
 import { useFlightsStore } from '../src/store/flights';
+import { useConnectionStore } from '../src/store/connection';
 import { makeFlight } from './helpers';
 
 describe('LiveState', () => {
@@ -45,6 +46,33 @@ describe('LiveState', () => {
     }
     expect(s.flights).toHaveLength(0);
     expect(isFlight(makeFlight())).toBe(true);
+  });
+
+  it('drops unknown phases, aircraft types, unsafe colors and bad home airports', () => {
+    for (const bad of [
+      { phase: 'boarding' },
+      { aircraftType: 'zeppelin' },
+      { liveryColor: 'red;background:url(x)' },
+    ]) {
+      expect(isFlight(makeFlight(bad as never)), JSON.stringify(bad)).toBe(false);
+    }
+    const s = new LiveState();
+    s.apply({ event: 'opened', flight: makeFlight({ id: 'A' }) }, 0);
+    s.apply({ event: 'phase', id: 'A', phase: 'boarding' as never }, 1);
+    s.apply(
+      { event: 'updated', id: 'A', patch: { aircraftType: 'zeppelin', liveryColor: 'x;y', phase: 'nope' } as never },
+      2,
+    );
+    const f = s.byId.get('A')!;
+    expect([f.phase, f.aircraftType, f.liveryColor]).toEqual(['cruise', 'widebody', '#ffffff']);
+    s.apply({ event: 'updated', id: 'A', patch: { aircraftType: 'cargo', liveryColor: '#ABC' } }, 3);
+    expect([f.aircraftType, f.liveryColor]).toEqual(['cargo', '#ABC']);
+
+    const home = { id: 'primary', label: 'x', lat: 1, lng: 2, ip: '', isVpn: false };
+    const msg = parseServerMessage(
+      JSON.stringify({ type: 'home_update', homeAirports: [home, { ...home, id: 'bad', lat: 'NaN' }, null] }),
+    );
+    expect(msg).toEqual({ type: 'home_update', homeAirports: [home] });
   });
 
   it('parseServerMessage rejects bad frames', () => {
@@ -103,6 +131,47 @@ describe('useLiveFlights reconnect', () => {
     FakeWS.instances[1].open();
     vi.advanceTimersByTime(10_000); // old socket's onclose fires; no retry should follow
     expect(FakeWS.instances).toHaveLength(2);
+  });
+
+  it('the attempt counter keeps counting through an outage and resets on connect', () => {
+    renderHook(() => useLiveFlights(true));
+    const seen: number[] = [];
+    for (let i = 0; i < 3; i++) {
+      FakeWS.instances.at(-1)!.close();
+      vi.advanceTimersByTime(3100);
+      seen.push(useConnectionStore.getState().attempt);
+    }
+    expect(seen).toEqual([2, 3, 4]);
+    FakeWS.instances.at(-1)!.open();
+    expect(useConnectionStore.getState()).toMatchObject({ reconnecting: false, attempt: 0 });
+  });
+
+  it('moves ?token from the URL into sessionStorage and uses it for the socket', () => {
+    history.replaceState(null, '', '/?token=s3cret&x=1');
+    renderHook(() => useLiveFlights(true));
+    expect(location.search).toBe('?x=1');
+    expect(FakeWS.instances[0].url).toContain('token=s3cret');
+    FakeWS.instances[0].close();
+    vi.advanceTimersByTime(3100);
+    expect(FakeWS.instances[1].url).toContain('token=s3cret');
+    sessionStorage.clear();
+    history.replaceState(null, '', '/');
+  });
+
+  it('pruning or a reset clears a selection whose flight is gone', () => {
+    renderHook(() => useLiveFlights(true));
+    const ws = FakeWS.instances[0];
+    ws.open();
+    const base = { homeAirports: [], backend: { capture: 'tshark', dpiMode: 'full', iface: 'en0', interfaces: [] } };
+    ws.message({ type: 'init', ...base, flights: [makeFlight({ id: 'A' }), makeFlight({ id: 'B' })] });
+    vi.advanceTimersByTime(200);
+    useFlightsStore.getState().selectFlight('A');
+    ws.message({ type: 'batch', events: [{ event: 'closed', id: 'A', bytesTotal: 1, durationMs: 1 }] });
+    vi.advanceTimersByTime(200);
+    expect(useFlightsStore.getState().selectedFlightId).toBe('A'); // still lingering
+    vi.advanceTimersByTime(63_000); // past LANDED_TTL_MS → pruned
+    expect(useFlightsStore.getState().flights.map((f) => f.id)).toEqual(['B']);
+    expect(useFlightsStore.getState().selectedFlightId).toBeNull();
   });
 
   it('init after a reconnect replaces the flight list with the snapshot', () => {

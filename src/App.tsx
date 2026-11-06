@@ -117,7 +117,9 @@ export default function App() {
     <div className="relative h-screen w-screen overflow-hidden bg-black">
       {/* Screen-reader scene description + selected-flight live region (the map
           itself is a canvas and invisible to assistive tech). */}
-      <SceneAnnouncer />
+      <ErrorBoundary>
+        <SceneAnnouncer />
+      </ErrorBoundary>
 
       {/* Map / globe fills the screen; ErrorBoundary keeps a view crash (e.g. the
           lazy globe chunk) from white-screening the whole app. */}
@@ -146,12 +148,15 @@ export default function App() {
       <About />
       {/* Bottom row: tabbed board · docked flight card. Phones stack them
           (card above, board below) so neither gets squeezed. */}
-      <div className="pointer-events-none absolute inset-x-0 bottom-4 z-10 flex items-end gap-2 px-4 max-[700px]:flex-col-reverse max-[700px]:items-stretch">
-        <div className="pointer-events-auto shrink-0">
-          <Board />
+      {/* Safety net: a bad flight must not blank the whole app via the HUD. */}
+      <ErrorBoundary>
+        <div className="pointer-events-none absolute inset-x-0 bottom-4 z-10 flex items-end gap-2 px-4 max-[700px]:flex-col-reverse max-[700px]:items-stretch">
+          <div className="pointer-events-auto shrink-0">
+            <Board />
+          </div>
+          <FlightCard />
         </div>
-        <FlightCard />
-      </div>
+      </ErrorBoundary>
 
       {/* Filter drawer (shadcn Sheet) */}
       <FilterPanel />
