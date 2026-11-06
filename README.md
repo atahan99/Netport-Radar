@@ -15,6 +15,10 @@ keeping them apart.
 | --- | --- |
 | ![2D map with live flights](docs/screenshot-map-2d.png) | ![3D globe view](docs/screenshot-globe-3d.png) |
 
+| Flight card | Filters |
+| --- | --- |
+| ![Flight card detail](docs/screenshot-flight-card.png) | ![Filter drawer](docs/screenshot-filters.png) |
+
 ## Security design
 
 ### Threat model
