@@ -48,7 +48,7 @@ export default function Legend() {
     <>
       <div className="fixed inset-0 z-30" onClick={close} aria-hidden="true" />
       <div
-        className="hud-scroll absolute right-4 top-[4.5rem] z-40 max-h-[80vh] w-72 overflow-y-auto max-[640px]:left-4 max-[640px]:w-auto max-[640px]:max-h-[60vh] rounded-xl border border-zinc-800 bg-black/90 p-3.5 text-xs backdrop-blur-sm"
+        className="hud-panel hud-scroll absolute right-4 top-[4.5rem] z-40 max-h-[80vh] w-72 overflow-y-auto max-[640px]:left-4 max-[640px]:w-auto max-[640px]:max-h-[60vh] rounded-xl border border-zinc-800 bg-black/90 p-3.5 text-xs backdrop-blur-sm"
         role="dialog"
         aria-label="Legend"
       >

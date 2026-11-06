@@ -45,6 +45,8 @@ export interface Theme {
   bg: string; // app background
   mapStyle: string | StyleSpecification; // 2D base style
   mapRecolor?: MapRecolor; // optional dark-base recolor (absent = native colors)
+  // Light basemap: HUD panels switch to light surfaces (see index.css).
+  light?: boolean;
 }
 
 const DARK = 'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json';
@@ -147,6 +149,7 @@ export const THEMES: Theme[] = [
   {
     id: 'arctic',
     label: 'Arctic',
+    light: true,
     accent: '#0ea5e9',
     atmosphere: '#aee3ff',
     atmosphereAlt: 0.12,
@@ -182,4 +185,6 @@ export function applyTheme(name: ThemeName): void {
   r.dataset.theme = t.id;
   r.style.setProperty('--theme-accent', t.accent);
   r.style.setProperty('--theme-bg', t.bg);
+  r.dataset.themeMode = t.light ? 'light' : 'dark';
+  r.style.colorScheme = t.light ? 'light' : 'dark';
 }

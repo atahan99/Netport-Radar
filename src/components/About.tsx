@@ -24,7 +24,7 @@ export default function About() {
     <>
       <div className="fixed inset-0 z-30" onClick={close} aria-hidden="true" />
       <div
-        className="hud-scroll absolute right-4 top-[4.5rem] z-40 max-h-[70vh] w-80 overflow-y-auto rounded-xl border border-zinc-800 bg-black/90 p-3.5 text-xs backdrop-blur-sm max-[640px]:left-4 max-[640px]:w-auto"
+        className="hud-panel hud-scroll absolute right-4 top-[4.5rem] z-40 max-h-[70vh] w-80 overflow-y-auto rounded-xl border border-zinc-800 bg-black/90 p-3.5 text-xs backdrop-blur-sm max-[640px]:left-4 max-[640px]:w-auto"
         role="dialog"
         aria-label={`About ${APP_NAME}`}
       >

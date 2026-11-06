@@ -50,7 +50,7 @@ export function Board() {
   const homeOf = (f: Flight) => homeAirports.find((a) => a.id === f.homeAirportId);
 
   return (
-    <div className="w-[360px] max-w-[calc(100vw-2rem)] rounded-xl border border-zinc-800 bg-black/85 backdrop-blur-sm max-[900px]:w-[300px]">
+    <div className="hud-panel w-[360px] max-w-[calc(100vw-2rem)] rounded-xl border border-zinc-800 bg-black/85 backdrop-blur-sm max-[900px]:w-[300px]">
       <div role="tablist" aria-label="Flight boards" className="flex border-b border-zinc-800 px-1">
         {TABS.map((t, i) => {
           const selected = t.id === tab;

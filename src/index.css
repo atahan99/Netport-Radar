@@ -1,7 +1,7 @@
 @import "tailwindcss";
 
-/* netport-radar — dark-only HUD theme. shadcn semantic tokens mapped to a
-   near-black zinc palette. No light mode. */
+/* HUD theme. shadcn semantic tokens mapped to a near-black zinc palette;
+   light themes remap panels via .hud-panel further down. */
 :root {
   --background: 0 0% 3%;
   --foreground: 0 0% 96%;
@@ -157,7 +157,8 @@ body {
   top: 4rem;
 }
 
-/* Attribution in the HUD's dark style instead of MapLibre's white pill. */
+/* Attribution in the HUD's dark style instead of MapLibre's white pill (kept
+   dark on Arctic too: it sits on the map, not in a panel). */
 .maplibregl-ctrl-attrib.maplibregl-compact {
   background: rgb(0 0 0 / 0.85);
   border: 1px solid #27272a;
@@ -172,6 +173,42 @@ body {
 }
 .maplibregl-ctrl-attrib.maplibregl-compact .maplibregl-ctrl-attrib-button {
   background-color: transparent;
+}
+
+/* Light themes (Arctic): HUD panels switch to light surfaces. Tailwind v4
+   compiles text/border/zinc classes to var(--color-*), so remapping the zinc
+   scale inside .hud-panel flips every panel without touching its markup.
+   Literal hex here, not var(): these variables are being redefined in this
+   scope. Opacity-blended black/zinc backgrounds compile to literals, hence
+   the explicit background. Unlayered, so it wins over Tailwind utilities. */
+.hud-panel {
+  /* marker class; styles below apply only in light mode */
+}
+[data-theme-mode='light'] .hud-panel {
+  color-scheme: light;
+  background-color: rgb(255 255 255 / 0.9);
+  --color-black: #ffffff;
+  --color-zinc-950: #fafafa;
+  --color-zinc-900: #f4f4f5;
+  --color-zinc-800: #e4e4e7;
+  --color-zinc-700: #d4d4d8;
+  --color-zinc-600: #71717a;
+  --color-zinc-500: #52525b;
+  --color-zinc-400: #52525b;
+  --color-zinc-300: #3f3f46;
+  --color-zinc-200: #27272a;
+  --color-zinc-100: #18181b;
+  --color-zinc-50: #09090b;
+  /* Phase / rate colors darken to stay readable on white. */
+  --color-blue-400: #1d4ed8;
+  --color-emerald-400: #047857;
+  --color-amber-400: #b45309;
+  --color-orange-400: #c2410c;
+  --color-amber-300: #92400e;
+}
+[data-theme-mode='light'] .hud-panel .hud-scroll::-webkit-scrollbar-thumb,
+[data-theme-mode='light'] .hud-panel.hud-scroll::-webkit-scrollbar-thumb {
+  background: #c4c4c8;
 }
 
 /* Thin dark scrollbars for the boards */
