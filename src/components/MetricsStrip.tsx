@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Menu, Map as MapIcon, Globe, Download, CircleHelp, Stethoscope } from 'lucide-react';
 import { downloadFile } from '@/lib/utils';
+import { legendSeen, markLegendSeen } from '@/lib/legend-hint';
 import { useFlightsStore } from '@/store/flights';
 import { useFiltersStore } from '@/store/filters';
 import { filterChips } from '@/lib/filter-chips';
@@ -99,6 +100,14 @@ export default function MetricsStrip() {
   const setViewMode = useFiltersStore((s) => s.setViewMode);
   const toggleFilterDrawer = useFiltersStore((s) => s.toggleFilterDrawer);
   const toggleLegend = useFiltersStore((s) => s.toggleLegend);
+  const [legendHint, setLegendHint] = useState(() => !legendSeen());
+  // Narrow screens: the strip scrolls. Start scrolled to the end so the
+  // controls are visible; the metrics are a swipe away.
+  const stripRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = stripRef.current;
+    if (el) el.scrollLeft = el.scrollWidth;
+  }, []);
   const theme = useFiltersStore((s) => s.theme);
   const setTheme = useFiltersStore((s) => s.setTheme);
   const hasActiveFilters = useFiltersStore((s) => filterChips(s).length > 0);
@@ -170,8 +179,8 @@ export default function MetricsStrip() {
 
   return (
     <>
-    <div className="flex flex-col items-end gap-1">
-    <div className="flex h-10 flex-nowrap items-center justify-end gap-x-3 overflow-x-auto rounded-xl border border-zinc-800 bg-black/85 px-3 font-mono text-[11px] text-zinc-300 backdrop-blur-sm [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+    <div className="flex max-w-full flex-col items-end gap-1">
+    <div ref={stripRef} className="flex h-10 max-w-full flex-nowrap items-center justify-start gap-x-3 overflow-x-auto rounded-xl border border-zinc-800 bg-black/85 px-3 font-mono text-[11px] text-zinc-300 backdrop-blur-sm [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
       <div className="flex shrink-0 items-center gap-1.5">
         <span className="text-emerald-400">↓</span>
         <canvas ref={inCanvas} width={40} height={16} className="block h-4 w-10 shrink-0 opacity-90" />
@@ -230,9 +239,21 @@ export default function MetricsStrip() {
             <span className="pointer-events-none absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full bg-amber-400" />
           )}
         </div>
-        <StripButton onClick={toggleLegend} label="Legend">
-          <CircleHelp />
-        </StripButton>
+        <div className="relative">
+          <StripButton
+            onClick={() => {
+              markLegendSeen();
+              setLegendHint(false);
+              toggleLegend();
+            }}
+            label="Legend"
+          >
+            <CircleHelp />
+          </StripButton>
+          {legendHint && (
+            <span className="pointer-events-none absolute inset-0 rounded-md ring-2 ring-sky-400/70 motion-safe:animate-pulse" />
+          )}
+        </div>
         <StripButton onClick={() => setViewMode(viewMode === '2d' ? '3d' : '2d')} label="2D / 3D">
           {viewMode === '2d' ? <MapIcon /> : <Globe />}
         </StripButton>

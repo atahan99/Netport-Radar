@@ -115,7 +115,7 @@ export function makeMarkerEntry(m: maplibregl.Marker, f: Flight): MarkerEntry {
       phase: f.phase,
       opacity: -1,
       scale: -1,
-      labelShown: false,
+      labelShown: true, // matches the DOM: makeMarkerEl creates the chip visible
       chipText: label.textContent ?? '',
       lat: NaN,
       lng: NaN,

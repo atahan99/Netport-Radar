@@ -7,7 +7,7 @@ import { mapRef, globeRef, flightCardRef } from '@/lib/view-refs';
 import { flightWorldPos } from '@/lib/flight-pos';
 import { liveProgress } from '@/lib/anim';
 import { protocolBadgeClass, PROTOCOL_LABELS } from '@/lib/classify';
-import { PHASE_META } from '@/lib/phase';
+import { PHASE_META, progressCaption } from '@/lib/phase';
 import { fmtBytes, fmtRate, fmtDur } from '@/lib/format';
 import { cn } from '@/lib/utils';
 import { geoPlaceLabel } from '@/lib/geo-display';
@@ -139,7 +139,7 @@ function CardBody({
           <div className="h-full rounded-full transition-[width] duration-300" style={{ width: `${pct}%`, background: f.liveryColor }} />
         </div>
         <span className="font-mono text-[10px] tabular-nums text-zinc-400">{pct}%</span>
-        <span className="text-[10px] text-zinc-500">{f.direction === 'inbound' ? 'Arriving' : 'Departing'}</span>
+        <span className="text-[10px] text-zinc-500">{progressCaption(f.phase, f.direction)}</span>
       </div>
       <div className="grid grid-cols-4 gap-1 border-t border-zinc-800/80 px-3 py-2 text-center">
         <Stat label="Dur" value={fmtDur(f.durationMs)} />

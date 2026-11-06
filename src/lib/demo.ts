@@ -48,6 +48,8 @@ const DESTINATIONS: Dest[] = [
   { city: 'Johannesburg', country: 'ZA', flag: '🇿🇦', lat: -26.2, lng: 28.04 },
 ];
 
+const DEST_BY_CITY = new Map(DESTINATIONS.map((d) => [d.city, d]));
+
 interface ProcDef {
   process: string;
   proto: DetectedProtocol;
@@ -56,26 +58,28 @@ interface ProcDef {
   host: string;
   org: string;
   asn: string;
+  at: string[]; // plausible server cities (DESTINATIONS) — a host never jumps continents at random
+  ip?: string; // fixed address for well-known anycast hosts
 }
 
 // Covers all 10 aircraft types (incl. HTTP→narrowbody, ICMP→ambulance, SSH→stealth).
 const PROCESS_POOL: ProcDef[] = [
-  { process: 'chrome', proto: 'HTTPS', port: 443, aircraft: 'widebody', host: 'google.com', org: 'Alphabet Inc.', asn: 'AS15169' },
-  { process: 'discord', proto: 'UDP', port: 443, aircraft: 'helicopter', host: 'discord.media', org: 'Discord Inc.', asn: 'AS49544' },
-  { process: 'spotify', proto: 'HTTPS', port: 443, aircraft: 'satellite', host: 'audio-fa.spotifycdn.com', org: 'Spotify AB', asn: 'AS8403' },
-  { process: 'steam', proto: 'TCP', port: 443, aircraft: 'cargo', host: 'steamcontent.com', org: 'Valve Corp', asn: 'AS32590' },
-  { process: 'firefox', proto: 'HTTPS', port: 443, aircraft: 'widebody', host: 'mozilla.net', org: 'Mozilla', asn: 'AS36856' },
-  { process: 'code', proto: 'HTTPS', port: 443, aircraft: 'widebody', host: 'update.code.visualstudio.com', org: 'Microsoft', asn: 'AS8075' },
-  { process: 'brave', proto: 'QUIC', port: 443, aircraft: 'helicopter', host: 'brave.com', org: 'Cloudflare', asn: 'AS13335' },
-  { process: 'signal', proto: 'HTTPS', port: 443, aircraft: 'widebody', host: 'chat.signal.org', org: 'Amazon AWS', asn: 'AS16509' },
-  { process: 'telegram', proto: 'HTTPS', port: 443, aircraft: 'widebody', host: 'telegram.org', org: 'Telegram', asn: 'AS62041' },
-  { process: 'obs', proto: 'RTMP', port: 1935, aircraft: 'broadcast', host: 'live.twitch.tv', org: 'Twitch', asn: 'AS46489' },
-  { process: 'protonvpn', proto: 'WireGuard', port: 51820, aircraft: 'privatejet', host: 'proton.me', org: 'Proton AG', asn: 'AS62371' },
-  { process: 'chrome', proto: 'DNS', port: 53, aircraft: 'drone', host: 'dns.google', org: 'Alphabet Inc.', asn: 'AS15169' },
-  { process: 'svchost.exe', proto: 'HTTPS', port: 443, aircraft: 'widebody', host: 'windowsupdate.com', org: 'Microsoft', asn: 'AS8075' },
-  { process: 'spotify', proto: 'HTTP', port: 80, aircraft: 'narrowbody', host: 'i.scdn.co', org: 'Spotify AB', asn: 'AS8403' },
-  { process: 'ping', proto: 'ICMP', port: 0, aircraft: 'ambulance', host: '1.1.1.1', org: 'Cloudflare', asn: 'AS13335' },
-  { process: 'ssh', proto: 'SSH', port: 22, aircraft: 'stealth', host: 'bastion.example.net', org: 'DigitalOcean', asn: 'AS14061' },
+  { process: 'chrome', proto: 'HTTPS', port: 443, aircraft: 'widebody', host: 'google.com', org: 'Alphabet Inc.', asn: 'AS15169', at: ['San Francisco', 'Frankfurt', 'Singapore', 'Mumbai', 'Sydney', 'São Paulo'] },
+  { process: 'discord', proto: 'UDP', port: 443, aircraft: 'helicopter', host: 'discord.media', org: 'Discord Inc.', asn: 'AS49544', at: ['New York', 'Frankfurt', 'Singapore', 'Seoul'] },
+  { process: 'spotify', proto: 'HTTPS', port: 443, aircraft: 'satellite', host: 'audio-fa.spotifycdn.com', org: 'Spotify AB', asn: 'AS8403', at: ['Stockholm', 'London'] },
+  { process: 'steam', proto: 'TCP', port: 443, aircraft: 'cargo', host: 'steamcontent.com', org: 'Valve Corp', asn: 'AS32590', at: ['Frankfurt', 'Amsterdam', 'Tokyo', 'Seoul'] },
+  { process: 'firefox', proto: 'HTTPS', port: 443, aircraft: 'widebody', host: 'mozilla.net', org: 'Mozilla', asn: 'AS36856', at: ['San Francisco', 'Amsterdam'] },
+  { process: 'code', proto: 'HTTPS', port: 443, aircraft: 'widebody', host: 'update.code.visualstudio.com', org: 'Microsoft', asn: 'AS8075', at: ['Amsterdam', 'New York'] },
+  { process: 'brave', proto: 'QUIC', port: 443, aircraft: 'helicopter', host: 'brave.com', org: 'Cloudflare', asn: 'AS13335', at: ['London', 'Frankfurt'] },
+  { process: 'signal', proto: 'HTTPS', port: 443, aircraft: 'widebody', host: 'chat.signal.org', org: 'Amazon AWS', asn: 'AS16509', at: ['New York'] },
+  { process: 'telegram', proto: 'HTTPS', port: 443, aircraft: 'widebody', host: 'telegram.org', org: 'Telegram', asn: 'AS62041', at: ['Amsterdam'] },
+  { process: 'obs', proto: 'RTMP', port: 1935, aircraft: 'broadcast', host: 'live.twitch.tv', org: 'Twitch', asn: 'AS46489', at: ['Frankfurt', 'San Francisco', 'São Paulo'] },
+  { process: 'protonvpn', proto: 'WireGuard', port: 51820, aircraft: 'privatejet', host: 'proton.me', org: 'Proton AG', asn: 'AS62371', at: ['Amsterdam', 'Stockholm', 'Toronto'] },
+  { process: 'chrome', proto: 'DNS', port: 53, aircraft: 'drone', host: 'dns.google', org: 'Alphabet Inc.', asn: 'AS15169', at: ['Frankfurt'], ip: '8.8.8.8' },
+  { process: 'svchost.exe', proto: 'HTTPS', port: 443, aircraft: 'widebody', host: 'windowsupdate.com', org: 'Microsoft', asn: 'AS8075', at: ['Amsterdam', 'New York', 'Johannesburg'] },
+  { process: 'spotify', proto: 'HTTP', port: 80, aircraft: 'narrowbody', host: 'i.scdn.co', org: 'Spotify AB', asn: 'AS8403', at: ['London', 'Stockholm'] },
+  { process: 'ping', proto: 'ICMP', port: 0, aircraft: 'ambulance', host: '1.1.1.1', org: 'Cloudflare', asn: 'AS13335', at: ['Frankfurt'], ip: '1.1.1.1' },
+  { process: 'ssh', proto: 'SSH', port: 22, aircraft: 'stealth', host: 'bastion.example.net', org: 'DigitalOcean', asn: 'AS14061', at: ['Amsterdam'] },
 ];
 
 interface SimFlight extends Flight {
@@ -101,11 +105,11 @@ const randIp = () => `${octet()}.${octet()}.${octet()}.${octet()}`;
 
 function makeFlight(now: number, inbound: boolean): SimFlight {
   const proc = pick(PROCESS_POOL);
-  const dest = pick(DESTINATIONS);
+  const dest = DEST_BY_CITY.get(pick(proc.at)) ?? DESTINATIONS[0];
   const home = Math.random() < 0.3 ? DEMO_HOME_AIRPORTS[1] : DEMO_HOME_AIRPORTS[0];
   const willHold = Math.random() < 0.5;
   const process = normalizeProcess(proc.process);
-  const remoteIp = randIp();
+  const remoteIp = proc.ip ?? randIp();
   const ephemeral = 1024 + Math.floor(Math.random() * 64000);
 
   const protocol =
@@ -266,12 +270,8 @@ export function useDemoFlights(enabled = true): void {
     let spawnTimer = 0;
     const scheduleSpawn = () => {
       spawnTimer = window.setTimeout(() => {
-        // ~15% of connections are short-lived (<2s) — logged, never rendered.
-        if (Math.random() < 0.15) {
-          console.log('[demo] short-lived flight skipped from rendering (log only)');
-        } else {
-          flights.push(makeFlight(performance.now(), Math.random() < 0.2));
-        }
+        // ~15% of connections are short-lived (<2s) and never rendered.
+        if (Math.random() >= 0.15) flights.push(makeFlight(performance.now(), Math.random() < 0.2));
         scheduleSpawn();
       }, rand(1000, 4000));
     };
@@ -287,7 +287,6 @@ export function useDemoFlights(enabled = true): void {
         for (let i = 0; i < 200; i++) {
           flights.push(makeFlight(base - rand(0, 9000), Math.random() < 0.3));
         }
-        console.log('[demo] burst: +200 flights');
       }
     };
     window.addEventListener('keydown', onKey);

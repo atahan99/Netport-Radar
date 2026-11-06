@@ -1,4 +1,3 @@
-import { useEffect } from 'react';
 import { X } from 'lucide-react';
 import { useFiltersStore } from '@/store/filters';
 import { AIRCRAFT_ICONS } from '@/lib/icons';
@@ -40,22 +39,16 @@ export default function Legend() {
   const setLegend = useFiltersStore((s) => s.setLegend);
   const demo = import.meta.env.VITE_DEMO === '1';
 
-  // Auto-open once on first ever visit.
-  useEffect(() => {
-    if (!localStorage.getItem('netport-legend-seen')) setLegend(true);
-  }, [setLegend]);
-
-  const close = () => {
-    localStorage.setItem('netport-legend-seen', '1');
-    setLegend(false);
-  };
+  // No auto-open: it covered the map on every first load. The legend button
+  // pulses until the user has opened it once (MetricsStrip).
+  const close = () => setLegend(false);
 
   if (!open) return null;
   return (
     <>
       <div className="fixed inset-0 z-30" onClick={close} aria-hidden="true" />
       <div
-        className="hud-scroll absolute right-4 top-[4.5rem] z-40 max-h-[80vh] w-72 overflow-y-auto rounded-xl border border-zinc-800 bg-black/90 p-3.5 text-xs backdrop-blur-sm"
+        className="hud-scroll absolute right-4 top-[4.5rem] z-40 max-h-[80vh] w-72 overflow-y-auto max-[640px]:left-4 max-[640px]:w-auto max-[640px]:max-h-[60vh] rounded-xl border border-zinc-800 bg-black/90 p-3.5 text-xs backdrop-blur-sm"
         role="dialog"
         aria-label="Legend"
       >

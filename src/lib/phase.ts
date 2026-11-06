@@ -54,3 +54,20 @@ export const PHASE_META: Record<FlightPhase, PhaseMeta> = {
 };
 
 export const PHASE_ORDER: FlightPhase[] = ['taxi', 'cruise', 'hold', 'descent', 'landed'];
+
+// Progress-bar caption on the flight card: what the flight is doing right now,
+// so a landed flight never reads "100% Departing".
+export function progressCaption(phase: FlightPhase, direction: 'inbound' | 'outbound'): string {
+  switch (phase) {
+    case 'taxi':
+      return 'Taxiing';
+    case 'hold':
+      return 'Holding';
+    case 'descent':
+      return 'Descending';
+    case 'landed':
+      return 'Landed';
+    default:
+      return direction === 'inbound' ? 'Arriving' : 'Departing';
+  }
+}
