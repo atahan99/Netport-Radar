@@ -2,7 +2,7 @@ import CaptureBanner from '@/components/CaptureBanner';
 import Toasts from '@/components/Toasts';
 
 // Single top-center column so the sudo banner and transient toasts stack instead
-// of overlapping (both used to hardcode top-16). aria-live announces toasts.
+// of overlapping. aria-live announces toasts.
 export default function NoticeStack() {
   return (
     <div

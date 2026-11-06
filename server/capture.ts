@@ -58,7 +58,7 @@ export function dumpcapPath(): string {
 // ── Backend auto-detect ────────────────────────────────────────────────────
 export function detectBackend(): CaptureBackend {
   // Force a specific backend (testing the tcpdump path on a tshark machine,
-  // and the Phase 9 fixtures).
+  // and the parser fixtures).
   const override = process.env.NETPORT_BACKEND;
   if (override === 'tshark' || override === 'tcpdump' || override === 'pcap') return override;
   try {

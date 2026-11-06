@@ -15,7 +15,7 @@ describe('parseTcpdumpLine (no -q: Flags visible)', () => {
     expect(p!.dstPort).toBe(443);
   });
 
-  it('FIN flag → tcpFin true (this is the Phase 7 fix that lets descent fire)', () => {
+  it('FIN flag → tcpFin true (lets descent fire before the stale timer)', () => {
     const p = parseTcpdumpLine('IP 142.250.80.46.443 > 192.168.1.5.54821: Flags [F.], seq 1, ack 1, win 501, length 0', LOCAL);
     expect(p!.tcpFin).toBe(true);
     expect(p!.tcpRst).toBe(false);
@@ -49,7 +49,7 @@ describe('parseTcpdumpLine (no -q: Flags visible)', () => {
     expect(p!.dstPort).toBe(53);
   });
 
-  it('ICMP echo (portless) → ICMP, ports 0 — Phase 7 behavior, no longer dropped', () => {
+  it('ICMP echo (portless) → ICMP with ports 0, not dropped', () => {
     const p = parseTcpdumpLine('IP 192.168.1.5 > 8.8.8.8: ICMP echo request, id 1, seq 1, length 64', LOCAL);
     expect(p).not.toBeNull();
     expect(p!.protocol).toBe('ICMP');

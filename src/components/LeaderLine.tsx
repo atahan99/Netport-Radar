@@ -7,8 +7,8 @@ import { flightWorldPos } from '@/lib/flight-pos';
 const GLOBE_R = 100;
 
 // Leader line from the selected plane to the docked card. Updates its endpoints
-// every frame via direct SVG attribute writes — zero per-frame React, and no
-// reading globeRef during render (which the old inline version did). Self-hides
+// every frame via direct SVG attribute writes (no per-frame React, and globeRef
+// is never read during render). Self-hides
 // when there's no docked selection or the plane is behind the globe's horizon.
 export default function LeaderLine({ w, h }: { w: number; h: number }) {
   const svgRef = useRef<SVGSVGElement>(null);

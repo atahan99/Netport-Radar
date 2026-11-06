@@ -230,7 +230,7 @@ async function main(): Promise<void> {
 
   // Capture + lsof are the only root-only operations. When we can drop privileges
   // (sudo on POSIX), they run in a root broker child and this process drops to the
-  // invoking user; otherwise they run inline, exactly as before.
+  // invoking user; otherwise they run inline.
   interface CaptureControl {
     switchTo(iface: string): void;
     stop(): void;

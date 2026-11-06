@@ -183,7 +183,7 @@ export class FlowTracker {
     }
     this.flows.delete(absorbKey);
     // The absorbed tuple is NOT repointed to the keeper — a later packet on
-    // that tuple starts a fresh flow, exactly as with the old linear scan.
+    // that tuple starts a fresh flow.
     this.unindexFlow(absorb);
     if (absorb.opened) {
       this.opts.onEvent({
@@ -318,7 +318,7 @@ export class FlowTracker {
     const lan = isPrivate(remoteIp);
 
     // Destination placement (the display must not lie about where this goes):
-    //  • LAN → park at home, it orbits there (Phase 5 LAN orbit).
+    //  • LAN → park at home, it orbits there (LAN orbit).
     //  • known geo → real coords.
     //  • public but un-geolocatable → a deterministic "unknown shelf" in the
     //    mid-Atlantic with country '??' — honest "somewhere, location unknown",

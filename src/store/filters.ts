@@ -170,7 +170,7 @@ export const useFiltersStore = create<FilterState>()(
       name: 'netport-filters',
       storage: createJSONStorage(() => sessionStorage),
       // Persist preferences only — NOT the transient drawer state, and NOT
-      // appSearch/isolatedCountry (U1): a fresh tab should never start with
+      // appSearch/isolatedCountry: a fresh tab should never start with
       // hidden traffic the user can't see they enabled last session.
       partialize: (s) => ({
         showHTTPS: s.showHTTPS,
