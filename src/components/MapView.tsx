@@ -72,6 +72,13 @@ export default function MapView() {
     // Carto/OSM/Esri tile usage requires attribution. CSS nudges it below the
     // metrics strip so it doesn't sit over the arrivals board (bottom-right).
     map.addControl(new maplibregl.AttributionControl({ compact: true }), 'top-right');
+    // MapLibre opens the compact control until the first drag; start it
+    // collapsed to the ⓘ (full credits are in the About panel).
+    map.once('load', () => {
+      const el = map.getContainer().querySelector('.maplibregl-ctrl-attrib');
+      el?.classList.remove('maplibregl-compact-show');
+      el?.removeAttribute('open');
+    });
 
     const markers = new Map<string, MarkerEntry>();
     const destBadges = new Map<string, { m: maplibregl.Marker; el: HTMLElement; last: string }>();

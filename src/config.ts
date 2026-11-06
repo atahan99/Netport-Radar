@@ -17,3 +17,7 @@ export const DNS_CAP = 20;
 
 // Toast auto-dismiss.
 export const TOAST_TTL_MS = 5000;
+
+// Branding (About panel, page title).
+export const APP_NAME = 'Netport-Radar';
+export const REPO_URL = 'https://github.com/atahan99/Netport-Radar';

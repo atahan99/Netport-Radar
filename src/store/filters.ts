@@ -55,6 +55,7 @@ export interface FilterState {
   trailStyle: TrailStyle; // livery colors vs FR24 altitude rainbow
   filterDrawerOpen: boolean;
   legendOpen: boolean;
+  aboutOpen: boolean;
   // Flight-card position — per view so each can default differently
   cardAnchor2d: CardAnchorMode; // default 'docked'
   cardAnchor3d: CardAnchorMode; // default 'docked'
@@ -73,6 +74,8 @@ export interface FilterState {
   toggleFilterDrawer: () => void;
   setLegend: (open: boolean) => void;
   toggleLegend: () => void;
+  setAbout: (open: boolean) => void;
+  toggleAbout: () => void;
   setBoardTab: (t: BoardTab) => void;
   resetKey: (key: FilterDataKey) => void; // reset one filter to its default
   reset: () => void;
@@ -147,6 +150,7 @@ export const useFiltersStore = create<FilterState>()(
       ...DEFAULTS,
       filterDrawerOpen: false,
       legendOpen: false,
+      aboutOpen: false,
       boardTab: 'outbound',
 
       toggle: (key) => set((s) => ({ [key]: !s[key] }) as Partial<FilterState>),
@@ -166,7 +170,10 @@ export const useFiltersStore = create<FilterState>()(
         ),
       toggleFilterDrawer: () => set((s) => ({ filterDrawerOpen: !s.filterDrawerOpen })),
       setLegend: (legendOpen) => set({ legendOpen }),
-      toggleLegend: () => set((s) => ({ legendOpen: !s.legendOpen })),
+      // Legend and About share the same spot under the toolbar: one at a time.
+      toggleLegend: () => set((s) => ({ legendOpen: !s.legendOpen, aboutOpen: false })),
+      setAbout: (aboutOpen) => set({ aboutOpen }),
+      toggleAbout: () => set((s) => ({ aboutOpen: !s.aboutOpen, legendOpen: false })),
       setBoardTab: (boardTab) => set({ boardTab }),
       resetKey: (key) => set({ [key]: DEFAULTS[key] } as Partial<FilterState>),
       reset: () => set({ ...DEFAULTS }),

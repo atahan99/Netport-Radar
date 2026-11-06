@@ -18,6 +18,7 @@ import StartupOverlay from '@/components/StartupOverlay';
 import ErrorBoundary from '@/components/ErrorBoundary';
 import FilterChips from '@/components/FilterChips';
 import Legend from '@/components/Legend';
+import About from '@/components/About';
 import SceneAnnouncer from '@/components/SceneAnnouncer';
 import FpsOverlay from '@/components/FpsOverlay';
 import SessionStats from '@/components/SessionStats';
@@ -76,7 +77,8 @@ export default function App() {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         const f = useFiltersStore.getState();
-        if (f.legendOpen) f.setLegend(false);
+        if (f.aboutOpen) f.setAbout(false);
+        else if (f.legendOpen) f.setLegend(false);
         else if (f.filterDrawerOpen) f.toggleFilterDrawer();
         else if (useFlightsStore.getState().selectedFlightId) {
           useFlightsStore.getState().selectFlight(null);
@@ -141,6 +143,7 @@ export default function App() {
         <FilterChips />
       </div>
       <Legend />
+      <About />
       {/* Bottom row: tabbed board · docked flight card */}
       <div className="pointer-events-none absolute inset-x-0 bottom-4 z-10 flex items-end gap-2 px-4">
         <div className="pointer-events-auto shrink-0">

@@ -157,6 +157,23 @@ body {
   top: 4rem;
 }
 
+/* Attribution in the HUD's dark style instead of MapLibre's white pill. */
+.maplibregl-ctrl-attrib.maplibregl-compact {
+  background: rgb(0 0 0 / 0.85);
+  border: 1px solid #27272a;
+  color: #a1a1aa;
+  font-size: 11px;
+}
+.maplibregl-ctrl-attrib.maplibregl-compact a {
+  color: #d4d4d8;
+}
+.maplibregl-ctrl-attrib-button {
+  filter: invert(1) opacity(0.7);
+}
+.maplibregl-ctrl-attrib.maplibregl-compact .maplibregl-ctrl-attrib-button {
+  background-color: transparent;
+}
+
 /* Thin dark scrollbars for the boards */
 .hud-scroll::-webkit-scrollbar {
   width: 6px;

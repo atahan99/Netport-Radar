@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Menu, Map as MapIcon, Globe, Download, CircleHelp, Stethoscope } from 'lucide-react';
+import { Menu, Map as MapIcon, Globe, Download, CircleHelp, Info, Stethoscope } from 'lucide-react';
 import { downloadFile } from '@/lib/utils';
 import { legendSeen, markLegendSeen } from '@/lib/legend-hint';
 import { useFlightsStore } from '@/store/flights';
@@ -115,6 +115,7 @@ export default function MetricsStrip() {
   const setViewMode = useFiltersStore((s) => s.setViewMode);
   const toggleFilterDrawer = useFiltersStore((s) => s.toggleFilterDrawer);
   const toggleLegend = useFiltersStore((s) => s.toggleLegend);
+  const toggleAbout = useFiltersStore((s) => s.toggleAbout);
   // First-visit hint on the legend button. It ends the first time the legend
   // opens, by button or by the L key (recorded below, read back here).
   const legendOpen = useFiltersStore((s) => s.legendOpen);
@@ -276,6 +277,9 @@ export default function MetricsStrip() {
             <span className="pointer-events-none absolute inset-0 rounded-md ring-2 ring-sky-400/70 motion-safe:animate-pulse" />
           )}
         </div>
+        <StripButton onClick={toggleAbout} label="About and sources">
+          <Info />
+        </StripButton>
         <span className="mx-0.5 h-5 w-px bg-zinc-700" aria-hidden="true" />
         <StripButton onClick={doExport} label="Export log">
           <Download />
