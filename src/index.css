@@ -175,8 +175,10 @@ body {
    Literal hex here, not var(): these variables are being redefined in this
    scope. Opacity-blended black/zinc backgrounds compile to literals, hence
    the explicit background. Unlayered, so it wins over Tailwind utilities. */
+/* All HUD panels: a soft shadow so they lift off the basemap instead of
+   blending into it (Midnight's panels and land are nearly the same shade). */
 .hud-panel {
-  /* marker class; styles below apply only in light mode */
+  box-shadow: 0 8px 24px -10px rgb(0 0 0 / 0.65);
 }
 [data-theme-mode='light'] .hud-panel {
   color-scheme: light;

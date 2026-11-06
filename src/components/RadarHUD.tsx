@@ -105,7 +105,7 @@ export default function RadarHUD() {
 
   return (
     <div
-      className="relative rounded-xl border border-zinc-800 bg-black/85 p-1 backdrop-blur-sm"
+      className="relative rounded-xl border border-zinc-800 bg-black/85 p-1 shadow-[0_8px_24px_-10px_rgb(0_0_0/0.65)] backdrop-blur-sm"
       style={{ width: 152 }}
     >
       <canvas ref={ref} aria-hidden="true" className="mx-auto" style={{ width: S, height: S, display: 'block' }} />
