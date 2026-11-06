@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import * as THREE from 'three';
 import Globe, { type GlobeMethods } from 'react-globe.gl';
 import { useFlightsStore } from '@/store/flights';
-import { flightWorldPos } from '@/lib/flight-pos';
 import { useShallow } from 'zustand/react/shallow';
 import { useFiltersStore, selectFilterData } from '@/store/filters';
 import { getRenderQueueMemo } from '@/lib/render-queue';
@@ -10,25 +9,12 @@ import { flightEndpoints } from '@/lib/arc';
 import {
   globeBorderColor,
   useVectorPolygons,
-  polygonCapColor,
-  polygonSideColor,
   polygonStrokeColor,
-  homeRingColor,
   rgba,
 } from '@/lib/globe-color';
 import { globeMaterialFor } from '@/lib/globe-material';
-import { orientPlaneMesh } from '@/lib/mesh-orientation';
 import { interpolateArc, arcPoints, greatCircleKm, arcAltitude } from '@/lib/interpolate';
-import {
-  createPlaneMesh,
-  setPlaneSelected,
-  setPlaneLOD,
-  recolorPlane,
-  disposeUnusedMaterials,
-  triggerLandingFlare,
-  updateLandingFlare,
-  updateStrobes,
-} from '@/lib/globe-meshes';
+import { createPlaneMesh, disposeUnusedMaterials } from '@/lib/globe-meshes';
 import { trailPathColors } from '@/lib/trail-color';
 import { liveProgress } from '@/lib/anim';
 import { reducedMotion } from '@/lib/motion';
@@ -36,13 +22,31 @@ import { showTip, hideTip, flightTipText } from '@/lib/tooltip';
 import { THEME_BY_ID } from '@/lib/themes';
 import { globeRef as sharedGlobeRef, type GlobeApi } from '@/lib/view-refs';
 import LeaderLine from '@/components/LeaderLine';
+import { positionPlaneMesh, pickFlightAt } from '@/lib/globe-planes';
+import {
+  asF,
+  pathPointAlt,
+  pathStroke,
+  ringLat,
+  ringLng,
+  ringColor,
+  labelText,
+  labelColor,
+  pointLat,
+  pointLng,
+  pointRadius,
+  pointColor,
+  onPointClick,
+  polygonCapColorFn,
+  polygonSideColorFn,
+  type DestDot,
+  type TrailDatum,
+} from '@/lib/globe-accessors';
 import type { Flight, HomeAirport } from '@/types';
 
-const asF = (d: object) => d as Flight;
 const TRAIL_STEPS = 16;
 const TRAIL_STEPS_SEL = 32; // higher resolution for the selected flight
 const REMAIN_STEPS = 24; // remaining-route samples (selected flight only)
-const BANK_RAD = 0.45; // bank angle while circling (hold / LAN orbit)
 // LOD: beyond this camera distance from the globe center (radius 100), planes
 // render as dots instead of detailed silhouettes. Above react-globe.gl's
 // untouched default camera (altitude 2.5 ≈ 350) so silhouettes show even
@@ -51,25 +55,11 @@ const LOD_FAR_DIST = 360;
 // Default camera altitude — close enough that planes read as silhouettes.
 const DEFAULT_ALT = 1.7;
 
-// Trail entry: a flight, or the selected flight's remaining (estimated) route.
-type TrailDatum = Flight & { __remaining?: boolean };
 
 // Stable empty list so react-globe.gl doesn't rebuild polygons every render when
 // the theme has no country layer (Midnight / Satellite keep the photo earth).
 const NO_POLYGONS: object[] = [];
 
-interface DestDot {
-  country: string;
-  lat: number;
-  lng: number;
-  count: number;
-}
-
-// Per-frame scratch — never allocate inside the mesh-update loop.
-const _pos = new THREE.Vector3();
-const _fwdHint = new THREE.Vector3();
-
-const POINT_COLOR = () => 'rgba(255,255,255,0.55)';
 
 export default function GlobeView() {
   const globe = useRef<GlobeMethods | undefined>(undefined);
@@ -152,9 +142,7 @@ export default function GlobeView() {
   // every render. Caps are transparent (the terrain comes from the shader
   // material); polygons contribute crisp themed border strokes only.
   const borderColor = globeBorderColor(theme);
-  const polygonCapColorFn = useCallback(() => polygonCapColor(), []);
   const polygonStrokeColorFn = useCallback(() => polygonStrokeColor(borderColor), [borderColor]);
-  const polygonSideColorFn = useCallback(() => polygonSideColor(), []);
   const polygonsData = useVectorPolygons(theme) ? countries : NO_POLYGONS;
 
   useEffect(() => {
@@ -267,8 +255,6 @@ export default function GlobeView() {
     const steps = f.id === selRef.current ? TRAIL_STEPS_SEL : TRAIL_STEPS;
     return trailPathColors(f.liveryColor, steps, f.arcProgress, useFiltersStore.getState().trailStyle);
   }, []);
-  const pathPointAlt = useCallback((p: unknown) => (p as number[])[2], []);
-  const pathStroke = useCallback((d: object) => ((d as TrailDatum).__remaining ? 1.1 : 1.6), []);
   const pathDashLength = useCallback(
     (d: object) => ((d as TrailDatum).__remaining ? 0.05 : isVpn(asF(d)) ? 0.5 : 1),
     [isVpn],
@@ -278,13 +264,6 @@ export default function GlobeView() {
     [isVpn],
   );
 
-  const ringLat = useCallback((d: object) => (d as HomeAirport).lat, []);
-  const ringLng = useCallback((d: object) => (d as HomeAirport).lng, []);
-  const ringColor = useCallback(
-    (d: object) => () =>
-      (d as { __color?: string }).__color ?? homeRingColor((d as HomeAirport).isVpn),
-    [],
-  );
 
   // Destination beacon: a livery-colored ring pulse at the selected flight's
   // destination. Memoized on scalars so the ring datum keeps its identity
@@ -307,19 +286,7 @@ export default function GlobeView() {
     };
     return [...homeAirports, dest];
   }, [homeAirports, showDestRing, destLat, destLng, destColor]);
-  const labelText = useCallback((d: object) => (d as HomeAirport).label, []);
-  const labelColor = useCallback(
-    (d: object) => homeRingColor((d as HomeAirport).isVpn),
-    [],
-  );
 
-  const pointLat = useCallback((d: object) => (d as DestDot).lat, []);
-  const pointLng = useCallback((d: object) => (d as DestDot).lng, []);
-  const pointRadius = useCallback((d: object) => 0.18 + Math.min(0.35, (d as DestDot).count * 0.03), []);
-  const onPointClick = useCallback(
-    (d: object) => useFiltersStore.getState().setIsolatedCountry((d as DestDot).country),
-    [],
-  );
 
   const customThreeObject = useCallback((d: object) => {
     const f = asF(d);
@@ -329,37 +296,14 @@ export default function GlobeView() {
     return mesh;
   }, []);
 
-  // Position/orient/scale/flare a plane mesh for `progress` along its arc. Driven
-  // every frame by the rAF ticker (with arcProgressLive) and once on data-change
-  // by customThreeObjectUpdate (so a freshly-created mesh isn't a frame late).
+  // Driven every frame by the rAF ticker (with arcProgressLive) and once on
+  // data change by customThreeObjectUpdate, so a new mesh isn't a frame late.
   const updateMesh = useCallback(
-    (o: THREE.Object3D, f: Flight, g: GlobeApi, now: number, progress: number) => {
-      const home = homeById(f.homeAirportId);
-      const { lat, lng, alt, pose } = flightWorldPos(f, home, now, progress);
-      const c = g.getCoords(lat, lng, alt);
-      _pos.set(c.x, c.y, c.z);
-      o.position.copy(_pos);
-      // Forward hint uses the pose slightly in the future so orbiting planes
-      // (hold circles / LAN) face along their actual motion, not just the arc.
-      const next = flightWorldPos(f, home, now + 130, Math.min(1, progress + 0.01));
-      const nc = g.getCoords(next.lat, next.lng, alt);
-      _fwdHint.set(nc.x, nc.y, nc.z);
-      // Bank into the turn while circling (hold / LAN orbit).
-      const banking = !reducedMotion() && (f.phase === 'hold' || (f.isLan && f.phase !== 'landed'));
-      orientPlaneMesh(_pos, _fwdHint, o.quaternion, banking ? BANK_RAD : 0);
-      setPlaneSelected(o, f.id === selRef.current);
-      // Taxi spool / landed shrink layers on top of the selection scale.
-      o.scale.multiplyScalar(pose.scale);
-      recolorPlane(o, f.liveryColor, f.aircraftType);
-      // One-shot landing flare on touchdown (descent → landed).
-      if (o.userData.phase !== f.phase) {
-        if (f.phase === 'landed' && o.userData.phase && !reducedMotion()) triggerLandingFlare(o, now);
-        o.userData.phase = f.phase;
-      }
-      updateLandingFlare(o, now);
-      setPlaneLOD(o, farRef.current);
-      updateStrobes(o, now, !reducedMotion() && !farRef.current && f.phase !== 'landed');
-    },
+    (o: THREE.Object3D, f: Flight, g: GlobeApi, now: number, progress: number) =>
+      positionPlaneMesh(o, f, homeById(f.homeAirportId), g, now, progress, {
+        selected: f.id === selRef.current,
+        far: farRef.current,
+      }),
     [homeById],
   );
 
@@ -401,38 +345,10 @@ export default function GlobeView() {
     };
   }, [updateMesh]);
 
-  // Nearest rendered flight within `radiusPx` of a screen point, by projecting
-  // each flight's ACTUAL rendered position (same placement math as updateMesh:
-  // arc altitude + lifecycle orbit offsets). Projecting at ground level made
-  // high-altitude cruise planes and orbiting hold/LAN planes unclickable.
   const findFlightAt = useCallback(
     (x: number, y: number, radiusPx: number): Flight | null => {
       const g = globe.current as unknown as GlobeApi | null;
-      if (!g) return null;
-      const now = performance.now();
-      const cp = g.camera().position;
-      const camDist2 = cp.x * cp.x + cp.y * cp.y + cp.z * cp.z;
-      let best: Flight | null = null;
-      let bestD = radiusPx * radiusPx;
-      for (const f of renderedRef.current) {
-        const { lat, lng, alt } = flightWorldPos(f, homeById(f.homeAirportId), now);
-        // Skip planes on the far side of the globe — they project to valid
-        // screen coords but are hidden behind the sphere.
-        const c = g.getCoords(lat, lng, alt);
-        const dxc = c.x - cp.x;
-        const dyc = c.y - cp.y;
-        const dzc = c.z - cp.z;
-        if (dxc * dxc + dyc * dyc + dzc * dzc > camDist2) continue;
-        const sc = g.getScreenCoords(lat, lng, alt);
-        const dx = sc.x - x;
-        const dy = sc.y - y;
-        const dd = dx * dx + dy * dy;
-        if (dd < bestD) {
-          bestD = dd;
-          best = f;
-        }
-      }
-      return best;
+      return g ? pickFlightAt(g, renderedRef.current, homeById, x, y, radiusPx, performance.now()) : null;
     },
     [homeById],
   );
@@ -574,7 +490,7 @@ export default function GlobeView() {
         pointsData={destData}
         pointLat={pointLat}
         pointLng={pointLng}
-        pointColor={POINT_COLOR}
+        pointColor={pointColor}
         pointAltitude={0.005}
         pointRadius={pointRadius}
         onPointClick={onPointClick}

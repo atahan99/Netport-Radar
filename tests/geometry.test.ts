@@ -51,10 +51,13 @@ describe('greatCircleKm', () => {
 });
 
 describe('arcAltitude', () => {
-  it('increases in bands with distance', () => {
-    expect(arcAltitude(500)).toBe(0.1);
-    expect(arcAltitude(3000)).toBe(0.2);
-    expect(arcAltitude(500)).toBeLessThan(arcAltitude(8000));
+  it('grows smoothly with distance and caps for long-haul arcs', () => {
+    expect(arcAltitude(500)).toBeLessThan(arcAltitude(3000));
+    expect(arcAltitude(3000)).toBeLessThan(arcAltitude(8000));
+    expect(arcAltitude(4999)).toBeCloseTo(arcAltitude(5001), 3); // no step at band edges
+    expect(arcAltitude(12000)).toBe(0.22);
+    expect(arcAltitude(20000)).toBe(0.22);
+    expect(arcAltitude(0)).toBeGreaterThan(0);
   });
 });
 
