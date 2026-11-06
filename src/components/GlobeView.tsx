@@ -389,18 +389,21 @@ export default function GlobeView() {
   useEffect(() => {
     let raf = 0;
     const frame = () => {
-      const g = globe.current as unknown as GlobeApi | null;
-      if (g) {
-        const now = performance.now();
-        const cp = g.camera().position;
-        farRef.current = Math.hypot(cp.x, cp.y, cp.z) > LOD_FAR_DIST;
-        const meshes = meshById.current;
-        for (const f of renderedRef.current) {
-          const o = meshes.get(f.id);
-          if (o) updateMesh(o, f, g, now, liveProgress(f));
+      try {
+        const g = globe.current as unknown as GlobeApi | null;
+        if (g) {
+          const now = performance.now();
+          const cp = g.camera().position;
+          farRef.current = Math.hypot(cp.x, cp.y, cp.z) > LOD_FAR_DIST;
+          const meshes = meshById.current;
+          for (const f of renderedRef.current) {
+            const o = meshes.get(f.id);
+            if (o) updateMesh(o, f, g, now, liveProgress(f));
+          }
         }
+      } finally {
+        raf = requestAnimationFrame(frame); // one bad frame must not stop the globe
       }
-      raf = requestAnimationFrame(frame);
     };
     raf = requestAnimationFrame(frame);
     return () => {
