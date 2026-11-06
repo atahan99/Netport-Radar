@@ -5,7 +5,7 @@ import { legendSeen, markLegendSeen } from '@/lib/legend-hint';
 import { useFlightsStore } from '@/store/flights';
 import { useFiltersStore } from '@/store/filters';
 import { filterChips } from '@/lib/filter-chips';
-import { THEMES, type ThemeName } from '@/lib/themes';
+import { THEMES, type Theme, type ThemeName } from '@/lib/themes';
 import { useRenderQueue } from '@/hooks/useRenderQueue';
 import { useBackendStore } from '@/store/backend';
 import { Button } from '@/components/ui/button';
@@ -69,6 +69,18 @@ function exportLog() {
     )
     .join('\n');
   downloadFile(lines, 'application/x-ndjson', 'ndjson');
+}
+
+// Three dots (accent, land, water) so themes are recognizable before picking.
+function ThemeSwatch({ theme: t }: { theme: Theme }) {
+  const colors = [t.accent, t.globeLand ?? t.bg, t.globeWater ?? t.atmosphere];
+  return (
+    <span className="ml-3 flex shrink-0 gap-0.5" aria-hidden="true">
+      {colors.map((c, i) => (
+        <span key={i} className="h-2.5 w-2.5 rounded-full border border-white/20" style={{ background: c }} />
+      ))}
+    </span>
+  );
 }
 
 function StripButton({
@@ -197,25 +209,28 @@ export default function MetricsStrip() {
         {offScreenCount > 0 && <span className="text-zinc-500"> (+{offScreenCount} off-screen)</span>}
       </div>
 
-      <span className="shrink-0 rounded bg-zinc-800 px-1.5 py-0.5 text-[10px] text-zinc-400">DPI: {dpi}</span>
+      <span className="shrink-0 rounded bg-zinc-800 px-1.5 py-0.5 text-[10px] text-zinc-300">DPI: {dpi}</span>
 
-      <Select
-        value={iface}
-        onValueChange={(v) => {
-          if (v !== iface && !demo) setPendingIface(v);
-        }}
-      >
-        <SelectTrigger className="h-7 w-[74px] shrink-0">
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent>
-          {ifaceOptions.map((opt) => (
-            <SelectItem key={opt} value={opt}>
-              {opt}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
+      {/* Demo mode has no capture interface to pick. */}
+      {!demo && (
+        <Select
+          value={iface}
+          onValueChange={(v) => {
+            if (v !== iface) setPendingIface(v);
+          }}
+        >
+          <SelectTrigger className="h-7 w-[74px] shrink-0" aria-label="Capture interface">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {ifaceOptions.map((opt) => (
+              <SelectItem key={opt} value={opt}>
+                {opt}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      )}
 
       <Select value={theme} onValueChange={(v) => setTheme(v as ThemeName)}>
         <SelectTrigger className="h-7 w-[96px] shrink-0" aria-label="Color theme">
@@ -223,7 +238,7 @@ export default function MetricsStrip() {
         </SelectTrigger>
         <SelectContent>
           {THEMES.map((t) => (
-            <SelectItem key={t.id} value={t.id}>
+            <SelectItem key={t.id} value={t.id} trailing={<ThemeSwatch theme={t} />}>
               {t.label}
             </SelectItem>
           ))}

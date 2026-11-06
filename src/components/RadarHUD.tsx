@@ -101,11 +101,15 @@ export default function RadarHUD() {
     <div
       aria-hidden="true"
       className="relative rounded-xl border border-zinc-800 bg-black/85 p-1 backdrop-blur-sm"
-      style={{ width: 128 }}
+      style={{ width: 152 }}
     >
-      <canvas ref={ref} style={{ width: S, height: S, display: 'block' }} />
-      <div className="pointer-events-none absolute inset-x-0 top-2 text-center text-[8px] tracking-wider text-zinc-600">
-        netport-radar
+      <canvas ref={ref} className="mx-auto" style={{ width: S, height: S, display: 'block' }} />
+      {/* The app's wordmark lives here, in the accent color (the old centered one sat under the toolbar). */}
+      <div
+        className="pointer-events-none absolute inset-x-0 top-2 text-center text-[10px] font-semibold tracking-[0.3em]"
+        style={{ color: 'var(--theme-accent, #a1a1aa)' }}
+      >
+        NETPORT·RADAR
       </div>
     </div>
   );

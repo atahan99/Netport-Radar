@@ -195,7 +195,7 @@ export function makeDestPinEl(): HTMLDivElement {
 }
 
 export function makeHomeEl(home: HomeAirport): HTMLDivElement {
-  const color = home.isVpn ? '#8b5cf6' : '#ffffff';
+  const color = home.isVpn ? '#a78bfa' : '#ffffff'; // violet-400: readable on dark basemaps
   const wrap = document.createElement('div');
   wrap.style.cssText = 'position:relative;width:0;height:0;pointer-events:none';
   for (let i = 0; i < 3; i++) {

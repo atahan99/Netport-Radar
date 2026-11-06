@@ -90,7 +90,7 @@ export function Board({ direction, title }: { direction: 'outbound' | 'inbound';
                 {f.phase.toUpperCase()}
               </span>
               {home?.isVpn && (
-                <span className="shrink-0 rounded bg-violet-900/60 px-1 text-[9px] text-violet-300">VPN</span>
+                <span className="shrink-0 rounded bg-violet-900/60 px-1 text-[10px] text-violet-300">VPN</span>
               )}
             </button>
           );

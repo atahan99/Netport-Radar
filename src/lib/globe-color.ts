@@ -46,7 +46,7 @@ export function polygonStrokeColor(borderColor: string): string {
 
 /** Home-airport ring color factory (VPN = purple, else white). */
 export function homeRingColor(isVpn: boolean): string {
-  return isVpn ? '#8b5cf6' : '#ffffff';
+  return isVpn ? '#a78bfa' : '#ffffff'; // violet-400: readable on the dark globe
 }
 
 /** Gradient trail colors along an arc path — quadratic ramp so the trail

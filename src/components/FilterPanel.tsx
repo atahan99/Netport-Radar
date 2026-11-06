@@ -57,7 +57,8 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
   );
 }
 
-// Toggle chip: bright when the protocol is shown, dim when hidden.
+// Toggle chip. Shown: solid pill with an accent dot. Hidden: dashed, struck
+// through and dimmed, so the two states differ in more than shade.
 function Chip({
   active,
   onClick,
@@ -73,12 +74,19 @@ function Chip({
       onClick={onClick}
       aria-pressed={active}
       className={cn(
-        'rounded-full border px-2.5 py-1 text-[11px] font-medium transition-colors',
+        'inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-medium transition-colors',
         active
-          ? 'border-zinc-600 bg-zinc-800 text-zinc-100'
-          : 'border-zinc-800 bg-transparent text-zinc-600 hover:border-zinc-700 hover:text-zinc-400',
+          ? 'border-zinc-500 bg-zinc-800 text-zinc-100'
+          : 'border-dashed border-zinc-700 bg-transparent text-zinc-500 line-through hover:border-zinc-500 hover:text-zinc-300',
       )}
     >
+      {active && (
+        <span
+          className="h-1.5 w-1.5 rounded-full"
+          style={{ background: 'var(--theme-accent, #4285f4)' }}
+          aria-hidden="true"
+        />
+      )}
       {children}
     </button>
   );
@@ -206,7 +214,7 @@ export default function FilterPanel() {
                 {s.isolatedCountry} <X className="h-3 w-3" /> clear
               </button>
             ) : (
-              <div className="text-xs text-zinc-600">Click a destination dot to isolate.</div>
+              <div className="text-xs text-zinc-500">Click a destination dot to isolate.</div>
             )}
           </div>
 

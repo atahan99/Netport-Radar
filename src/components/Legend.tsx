@@ -103,11 +103,11 @@ export default function Legend() {
                 {name}
               </span>
             ))}
-          <span className="self-center text-[9px] text-zinc-600">+{Object.keys(LIVERY_COLORS).length - 24} more</span>
+          <span className="self-center text-[10px] text-zinc-500">+{Object.keys(LIVERY_COLORS).length - 24} more</span>
         </div>
 
         {demo && (
-          <div className="mt-3 border-t border-zinc-800 pt-2 font-mono text-[10px] text-zinc-600">
+          <div className="mt-3 border-t border-zinc-800 pt-2 font-mono text-[10px] text-zinc-500">
             demo: R reconnect overlay · B burst 200 flights
           </div>
         )}
