@@ -143,7 +143,7 @@ export type ServerMessage =
   | { type: 'log'; ndjson: string }
   | { type: 'error'; code: string; message: string };
 
-// Client → server control (Phase 4): interface switching + log export.
+// Client → server control: interface switching and log export.
 export type ClientMessage =
   | { type: 'switch_iface'; iface: string }
   | { type: 'export' };

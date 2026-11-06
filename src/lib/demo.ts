@@ -1,5 +1,5 @@
 // src/lib/demo.ts
-// useDemoFlights() — simulates network flights for Phase 1 (no backend).
+// useDemoFlights(): simulated flights for demo mode (no backend).
 // Two home airports, all 10 aircraft types, ~80% outbound / ~20% inbound,
 // rAF-driven arcProgress + phase transitions. Hidden keys: R (reconnect
 // overlay), B (burst ~200 flights to exercise the 150-cap counter).

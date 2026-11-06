@@ -1,7 +1,7 @@
 // src/lib/classify.ts
 // netport-radar — protocol classification + UI display helpers.
 // Types live in src/types.ts and are imported here (single source of truth).
-// classify() drives LIVE data (Phase 3); the demo uses each PROCESS_POOL
+// classify() drives live data; the demo uses each PROCESS_POOL
 // entry's hardcoded aircraft type instead.
 
 import type { DetectedProtocol, AircraftType } from '../types';

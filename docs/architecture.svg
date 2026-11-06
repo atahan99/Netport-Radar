@@ -1,6 +1,6 @@
 <svg width="100%" viewBox="0 0 680 484" role="img" xmlns="http://www.w3.org/2000/svg">
 <title>netport-radar architecture and data flow</title>
-<desc>A packet is captured by a root broker (tshark/tcpdump + lsof), sent over IPC to an unprivileged server (flow tracker, geo lookup, WS/HTTP), then streamed by WebSocket to the browser, where Zustand stores feed a two-channel renderer driving the 2D map, 3D globe, and HUD.</desc>
+<desc>A packet is captured by a root broker that only opens the device (dumpcap or tcpdump -Z, plus lsof), streamed as raw pcap over a nonce-gated Unix socket to an unprivileged server that dissects it (tshark, flow tracker, geo lookup, WS/HTTP), then streamed by WebSocket to the browser, where Zustand stores feed a two-channel renderer driving the 2D map, 3D globe, and HUD.</desc>
 <style>
   text { font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
   .hd { fill:#e6edf3; font-size:15px; font-weight:600; }
@@ -21,18 +21,18 @@
 
 <text class="zone" x="40" y="130" text-anchor="start">2 · Root broker — runs as root (priv-broker.ts)</text>
 <rect x="64" y="138" width="252" height="48" rx="8" fill="#3a1d17" stroke="#e0683a"/>
-<text class="t" x="190" y="161" text-anchor="middle">tshark / tcpdump</text>
-<text class="ts" x="190" y="178" text-anchor="middle">capture + DPI</text>
+<text class="t" x="190" y="161" text-anchor="middle">dumpcap / tcpdump -Z</text>
+<text class="ts" x="190" y="178" text-anchor="middle">capture only, no parsing</text>
 <rect x="364" y="138" width="252" height="48" rx="8" fill="#3a1d17" stroke="#e0683a"/>
 <text class="t" x="490" y="161" text-anchor="middle">lsof</text>
 <text class="ts" x="490" y="178" text-anchor="middle">process attribution</text>
 <path d="M340 186 L340 208" fill="none" stroke="#7d8590" stroke-width="1.5" marker-end="url(#arrow)"/>
-<text class="ts" x="350" y="202" text-anchor="start">IPC: packets + proc map</text>
+<text class="ts" x="350" y="202" text-anchor="start">pcap via socket · proc map via IPC</text>
 
 <text class="zone" x="40" y="224" text-anchor="start">3 · Server — drops to your user, SUDO_UID (index.ts)</text>
 <rect x="44" y="232" width="180" height="48" rx="8" fill="#103a30" stroke="#2bb389"/>
-<text class="t" x="134" y="255" text-anchor="middle">Flow tracker</text>
-<text class="ts" x="134" y="272" text-anchor="middle">phase machine</text>
+<text class="t" x="134" y="255" text-anchor="middle">tshark → flow tracker</text>
+<text class="ts" x="134" y="272" text-anchor="middle">dissection, phase machine</text>
 <rect x="244" y="232" width="166" height="48" rx="8" fill="#103a30" stroke="#2bb389"/>
 <text class="t" x="327" y="255" text-anchor="middle">Geo lookup</text>
 <text class="ts" x="327" y="272" text-anchor="middle">geoip / MaxMind</text>

@@ -1,7 +1,7 @@
 {
   "name": "netport-radar",
   "private": true,
-  "version": "0.0.0",
+  "version": "1.0.0",
   "description": "Visualization-only local network monitor — your machine is an airport, every connection is a flight",
   "license": "MIT",
   "type": "module",

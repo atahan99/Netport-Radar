@@ -159,7 +159,7 @@ describe('destination placement', () => {
   });
 });
 
-describe('livery precedence (Phase 4 regression)', () => {
+describe('livery precedence', () => {
   it('process color wins; a later hostname does not overwrite it', async () => {
     mockLookup.mockReturnValue({ process: 'brave', processRaw: 'Brave', pid: 99 });
     // reverse-DNS resolves to a CDN name AFTER the process is already known
@@ -189,7 +189,7 @@ describe('late aircraft upgrade', () => {
   });
 });
 
-describe('metric cadence (Phase 8)', () => {
+describe('metric cadence', () => {
   it('emits metric patches at most once per second per flow', async () => {
     const { events, tracker } = setup();
     tracker.ingest(pkt({ host: 'x.com', length: 1000 }));

@@ -69,7 +69,7 @@ describe('WsHub protocol', () => {
   });
 });
 
-describe('WsHub security gate (Phase 6)', () => {
+describe('WsHub security gate', () => {
   it('loopback mode: no-Origin and localhost Origins allowed, foreign Origin rejected', async () => {
     const { port } = makeHub(null);
     await expect(connect(port)).resolves.toBeDefined(); // no Origin (CLI tools)
