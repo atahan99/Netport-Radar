@@ -94,9 +94,12 @@ export function greatCircleKm(
   return R * 2 * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h));
 }
 
-// Arc altitude (globe) proportional to distance.
+// Arc peak altitude on the globe (fraction of its radius). Grows smoothly with
+// distance and caps at ARC_ALT_MAX, so a long-haul arc stays inside the frame
+// at the default camera distance instead of leaving it as a straight line.
+const ARC_ALT_MIN = 0.05;
+const ARC_ALT_MAX = 0.22;
+const ARC_ALT_PER_KM = 0.000017; // reaches the cap around 10,000 km
 export function arcAltitude(km: number): number {
-  if (km < 1000) return 0.1;
-  if (km < 5000) return 0.2;
-  return 0.35;
+  return Math.min(ARC_ALT_MAX, ARC_ALT_MIN + Math.max(0, km) * ARC_ALT_PER_KM);
 }
