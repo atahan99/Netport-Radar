@@ -64,7 +64,7 @@ describe('polygon colors', () => {
 
 describe('homeRingColor', () => {
   it('VPN is purple, primary is white', () => {
-    expect(homeRingColor(true)).toBe('#8b5cf6');
+    expect(homeRingColor(true)).toBe('#a78bfa');
     expect(homeRingColor(false)).toBe('#ffffff');
   });
 });

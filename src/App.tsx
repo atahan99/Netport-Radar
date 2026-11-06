@@ -119,15 +119,6 @@ export default function App() {
         </Suspense>
       </ErrorBoundary>
 
-      {/* Wordmark behind the HUD — tinted by the active theme accent (decorative) */}
-      <div
-        aria-hidden="true"
-        className="pointer-events-none absolute inset-x-0 top-5 z-0 text-center text-sm font-semibold tracking-[0.35em]"
-        style={{ color: 'var(--theme-accent, #3f3f46)', opacity: 0.4 }}
-      >
-        NETPORT·RADAR
-      </div>
-
       {/* HUD overlays — radar hides on very narrow viewports */}
       <div className="absolute left-4 top-4 z-10 hidden min-[700px]:block">
         <RadarHUD />

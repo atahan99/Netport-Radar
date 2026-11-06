@@ -8,7 +8,7 @@ const Row = ({ label, count, bytes }: { label: string; count: number; bytes: num
     <span className="truncate text-zinc-300" title={label}>
       {label}
     </span>
-    <span className="shrink-0 tabular-nums text-zinc-500">
+    <span className="shrink-0 tabular-nums text-zinc-400">
       {count} · {fmtBytes(bytes)}
     </span>
   </div>
@@ -18,7 +18,7 @@ const Section = ({ title, items }: { title: string; items: { label: string; coun
   if (items.length === 0) return null
   return (
     <div>
-      <div className="mb-1 text-[9px] uppercase tracking-wider text-zinc-600">{title}</div>
+      <div className="mb-1 text-[10px] uppercase tracking-wider text-zinc-500">{title}</div>
       <div className="space-y-0.5">
         {items.map((item) => (
           <Row key={item.label} {...item} />
@@ -36,10 +36,10 @@ export default function SessionStats() {
 
   return (
     <div
-      className="mt-2 w-[128px] rounded-xl border border-zinc-800 bg-black/85 p-2 font-mono backdrop-blur-sm"
+      className="mt-2 w-[152px] rounded-xl border border-zinc-800 bg-black/85 p-2 font-mono backdrop-blur-sm"
       aria-label="Session statistics"
     >
-      <div className="mb-2 text-[9px] tracking-wider text-zinc-500">
+      <div className="mb-2 text-[10px] tracking-wider text-zinc-400">
         SESSION · {stats.totalFlights} flights · {fmtBytes(stats.totalBytes)}
       </div>
       <div className="space-y-2">

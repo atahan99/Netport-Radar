@@ -51,7 +51,7 @@ function anchoredPos(f: Flight, home: HomeAirport | undefined, is2d: boolean): S
 function Stat({ label, value }: { label: string; value: string }) {
   return (
     <div>
-      <div className="text-[9px] uppercase tracking-wider text-zinc-600">{label}</div>
+      <div className="text-[10px] uppercase tracking-wider text-zinc-500">{label}</div>
       <div className="font-mono text-[11px] tabular-nums text-zinc-200">{value}</div>
     </div>
   );
@@ -122,7 +122,7 @@ function CardBody({
       </div>
       <div className="flex items-center gap-2 border-t border-zinc-800/80 px-3 py-2 font-mono text-[11px]">
         <div className="min-w-0 flex-1">
-          <div className="truncate text-[9px] uppercase tracking-wider text-zinc-600">{home?.label ?? 'Your PC'}</div>
+          <div className="truncate text-[10px] uppercase tracking-wider text-zinc-500">{home?.label ?? 'Your PC'}</div>
           <div className="truncate text-zinc-300">{f.srcIp}:{f.srcPort}</div>
         </div>
         <div className="flex shrink-0 flex-col items-center px-1 leading-none text-zinc-600">
@@ -130,7 +130,7 @@ function CardBody({
           <span className="mt-0.5 text-[9px]">{f.direction === 'inbound' ? '←' : '→'}</span>
         </div>
         <div className="min-w-0 flex-1 text-right">
-          <div className="truncate text-[9px] uppercase tracking-wider text-zinc-600">{f.country} {f.countryFlag}</div>
+          <div className="truncate text-[10px] uppercase tracking-wider text-zinc-500">{f.country} {f.countryFlag}</div>
           <div className="truncate text-zinc-300">{f.dstIp}:{f.dstPort}</div>
         </div>
       </div>
