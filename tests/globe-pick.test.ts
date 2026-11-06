@@ -31,3 +31,12 @@ describe('pickFlightAt', () => {
     expect(pickFlightAt(fakeGlobe, [hidden], homeAt(-60, 0), 0, -60, 5, 0)).toBeNull();
   });
 });
+
+describe('asciiLabel', () => {
+  it('folds accents the globe font cannot draw', async () => {
+    const { asciiLabel } = await import('../src/lib/globe-accessors');
+    expect(asciiLabel('Zürich, CH (VPN)')).toBe('Zurich, CH (VPN)');
+    expect(asciiLabel('São Paulo, BR')).toBe('Sao Paulo, BR');
+    expect(asciiLabel('Istanbul, TR')).toBe('Istanbul, TR');
+  });
+});
