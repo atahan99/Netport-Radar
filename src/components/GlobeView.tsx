@@ -3,7 +3,8 @@ import * as THREE from 'three';
 import Globe, { type GlobeMethods } from 'react-globe.gl';
 import { useFlightsStore } from '@/store/flights';
 import { flightWorldPos } from '@/lib/flight-pos';
-import { useFiltersStore } from '@/store/filters';
+import { useShallow } from 'zustand/react/shallow';
+import { useFiltersStore, selectFilterData } from '@/store/filters';
 import { getRenderQueueMemo } from '@/lib/render-queue';
 import { flightEndpoints } from '@/lib/arc';
 import {
@@ -68,15 +69,18 @@ interface DestDot {
 const _pos = new THREE.Vector3();
 const _fwdHint = new THREE.Vector3();
 
+const POINT_COLOR = () => 'rgba(255,255,255,0.55)';
+
 export default function GlobeView() {
   const globe = useRef<GlobeMethods | undefined>(undefined);
   const flights = useFlightsStore((s) => s.flights);
   const homeAirports = useFlightsStore((s) => s.homeAirports);
   const selectedId = useFlightsStore((s) => s.selectedFlightId);
-  const filters = useFiltersStore();
+  const filters = useFiltersStore(useShallow(selectFilterData));
   const themeId = useFiltersStore((s) => s.theme);
   const theme = THEME_BY_ID[themeId];
   const idleTimer = useRef<number | undefined>(undefined);
+  const rendererRef = useRef<{ forceContextLoss(): void } | null>(null);
 
   // Refs so accessors below can be identity-stable (never trigger layer rebuilds).
   // Kept in sync via effects (not written during render) so the rAF ticker and
@@ -466,6 +470,54 @@ export default function GlobeView() {
     [findFlightAt],
   );
 
+  // Lights, initial camera, auto-rotate. Refs only, so the callback is stable.
+  const onGlobeReady = useCallback(() => {
+    const g = globe.current;
+    if (!g) return;
+    const scene = g.scene();
+    scene.add(new THREE.AmbientLight(0xffffff, 0.7));
+    const dir = new THREE.DirectionalLight(0xffffff, 0.85);
+    dir.position.set(1, 1, 1);
+    scene.add(dir);
+    const primary = homeRef.current.find((a) => a.id === 'primary') ?? homeRef.current[0];
+    // Always set the plane-visible default altitude — home may not have
+    // arrived yet; the homeAirports effect re-centers when it does.
+    g.pointOfView(
+      { lat: primary?.lat ?? 30, lng: primary?.lng ?? 15, altitude: DEFAULT_ALT },
+      0,
+    );
+    if (primary) homePointedRef.current = true;
+    const c = g.controls() as {
+      autoRotate: boolean;
+      autoRotateSpeed: number;
+      addEventListener: (e: string, cb: () => void) => void;
+    };
+    c.autoRotate = !reducedMotion();
+    c.autoRotateSpeed = 0.15;
+    c.addEventListener('start', () => {
+      userMovedRef.current = true;
+      c.autoRotate = false;
+      clearTimeout(idleTimer.current);
+    });
+    c.addEventListener('end', () => {
+      idleTimer.current = window.setTimeout(() => {
+        if (!useFlightsStore.getState().selectedFlightId && !reducedMotion()) c.autoRotate = true;
+      }, 2500);
+    });
+    rendererRef.current = g.renderer() as unknown as { forceContextLoss(): void };
+  }, []);
+
+  // react-globe.gl disposes the renderer on unmount but doesn't release the
+  // WebGL context; without this, 2D↔3D toggling piles up contexts until the
+  // browser starts dropping the oldest.
+  useEffect(
+    () => () => {
+      clearTimeout(idleTimer.current);
+      rendererRef.current?.forceContextLoss();
+    },
+    [],
+  );
+
   return (
     <div
       ref={containerRef}
@@ -492,40 +544,7 @@ export default function GlobeView() {
         polygonStrokeColor={polygonStrokeColorFn}
         polygonAltitude={0.006}
         polygonsTransitionDuration={0}
-        onGlobeReady={() => {
-          const g = globe.current;
-          if (!g) return;
-          const scene = g.scene();
-          scene.add(new THREE.AmbientLight(0xffffff, 0.7));
-          const dir = new THREE.DirectionalLight(0xffffff, 0.85);
-          dir.position.set(1, 1, 1);
-          scene.add(dir);
-          const primary = homeRef.current.find((a) => a.id === 'primary') ?? homeRef.current[0];
-          // Always set the plane-visible default altitude — home may not have
-          // arrived yet; the homeAirports effect re-centers when it does.
-          g.pointOfView(
-            { lat: primary?.lat ?? 30, lng: primary?.lng ?? 15, altitude: DEFAULT_ALT },
-            0,
-          );
-          if (primary) homePointedRef.current = true;
-          const c = g.controls() as {
-            autoRotate: boolean;
-            autoRotateSpeed: number;
-            addEventListener: (e: string, cb: () => void) => void;
-          };
-          c.autoRotate = !reducedMotion();
-          c.autoRotateSpeed = 0.15;
-          c.addEventListener('start', () => {
-            userMovedRef.current = true;
-            c.autoRotate = false;
-            clearTimeout(idleTimer.current);
-          });
-          c.addEventListener('end', () => {
-            idleTimer.current = window.setTimeout(() => {
-              if (!useFlightsStore.getState().selectedFlightId && !reducedMotion()) c.autoRotate = true;
-            }, 2500);
-          });
-        }}
+        onGlobeReady={onGlobeReady}
         /* trails (throttled) — VPN dashed */
         pathsData={trailData}
         pathPoints={pathPoints}
@@ -555,7 +574,7 @@ export default function GlobeView() {
         pointsData={destData}
         pointLat={pointLat}
         pointLng={pointLng}
-        pointColor={() => 'rgba(255,255,255,0.55)'}
+        pointColor={POINT_COLOR}
         pointAltitude={0.005}
         pointRadius={pointRadius}
         onPointClick={onPointClick}

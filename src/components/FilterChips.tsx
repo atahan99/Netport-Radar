@@ -1,9 +1,10 @@
 import { X } from 'lucide-react';
-import { useFiltersStore } from '@/store/filters';
+import { useShallow } from 'zustand/react/shallow';
+import { useFiltersStore, selectFilterData } from '@/store/filters';
 import { filterChips } from '@/lib/filter-chips';
 
 export default function FilterChips() {
-  const filters = useFiltersStore();
+  const filters = useFiltersStore(useShallow(selectFilterData));
   const resetKey = useFiltersStore((s) => s.resetKey);
   const chips = filterChips(filters);
   if (chips.length === 0) return null;

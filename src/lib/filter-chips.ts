@@ -2,7 +2,7 @@
 // Derive the set of active (non-default) filter chips. Kept out of the
 // component file so both FilterChips and MetricsStrip can import it.
 
-import type { FilterState, FilterDataKey } from '@/store/filters';
+import type { FilterData, FilterDataKey } from '@/store/filters';
 
 export interface FilterChip {
   key: FilterDataKey;
@@ -24,10 +24,10 @@ const PROTO_LABELS: Partial<Record<FilterDataKey, string>> = {
   showIPv6: 'IPv6',
 };
 
-export function filterChips(f: FilterState): FilterChip[] {
+export function filterChips(f: FilterData): FilterChip[] {
   const chips: FilterChip[] = [];
   for (const [key, label] of Object.entries(PROTO_LABELS) as [FilterDataKey, string][]) {
-    if (!f[key as keyof FilterState]) chips.push({ key, label: `${label} off` });
+    if (!f[key]) chips.push({ key, label: `${label} off` });
   }
   if (f.dnsDensity !== 'sample') chips.push({ key: 'dnsDensity', label: `DNS: ${f.dnsDensity}` });
   if (f.direction !== 'both') chips.push({ key: 'direction', label: `${f.direction} only` });
