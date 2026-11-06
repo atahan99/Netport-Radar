@@ -16,6 +16,8 @@ import {
   CLOSED_TTL_MS,
   EMIT_MIN_MS,
   TICK_MS,
+  MAX_FLOWS,
+  MAX_PTR_INFLIGHT,
 } from './config';
 import {
   isLoopback,
@@ -71,6 +73,8 @@ export interface FlowTrackerOpts {
   // A young flow is still unattributed — ask the lsof poller to hurry up
   // (adaptive cadence). Debounced downstream; safe to call every tick.
   onProcessMiss?: () => void;
+  // The flow table is full and a new flow was dropped (throttle downstream).
+  onFlowLimit?: () => void;
 }
 
 // Only poke the poller for flows younger than this — if lsof hasn't seen the
@@ -83,6 +87,7 @@ const BPS_BUCKET_COUNT = 12;
 const BPS_WINDOW_S = (BPS_BUCKET_COUNT * TICK_MS) / 1000;
 
 export class FlowTracker {
+  private ptrInflight = 0;
   private flows = new Map<string, Flow>();
   // Secondary indexes so findFlow() is O(1) instead of scanning every flow per
   // packet. Only open flows live here — closed flows are unindexed in close().
@@ -276,6 +281,12 @@ export class FlowTracker {
     let flow = existing;
     const now = Date.now();
     if (!flow) {
+      // Bounded: a port scan or spoofed flood must not grow memory without
+      // limit. Existing flows keep updating; new ones wait for room.
+      if (this.flows.size >= MAX_FLOWS) {
+        this.opts.onFlowLimit?.();
+        return;
+      }
       flow = this.create(p, localIp, localPort, remoteIp, remotePort, now, key);
       this.flows.set(key, flow);
       this.indexFlow(flow, key);
@@ -393,8 +404,12 @@ export class FlowTracker {
     };
 
     // async reverse DNS (in case no SNI/host comes through)
-    if (!lan) {
+    // Capped in-flight count: under a flood most lookups are skipped (SNI/host
+    // usually names the flow anyway) instead of queueing thousands of PTRs.
+    if (!lan && this.ptrInflight < MAX_PTR_INFLIGHT) {
+      this.ptrInflight++;
       void resolveHostname(remoteIp).then((name) => {
+        this.ptrInflight--;
         const flow = this.flows.get(flowKey);
         if (!flow || flow.hostnameResolved || name === remoteIp) return;
         flow.flight.hostname = name;

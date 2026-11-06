@@ -35,7 +35,7 @@ import {
   noteLookupMiss,
 } from './process-names';
 import type { BrokerIn, BrokerOut } from './priv-broker';
-import { WS_PORT, HTTP_PORT, BIND_HOST, IS_LOCAL_BIND, TOKEN } from './config';
+import { WS_PORT, HTTP_PORT, BIND_HOST, IS_LOCAL_BIND, TOKEN, MAX_FLOWS } from './config';
 
 function getDefaultInterface(): string {
   try {
@@ -199,6 +199,7 @@ async function main(): Promise<void> {
     sendProcessBoost();
   };
 
+  let lastFlowLimitWarn = 0;
   const tracker = new FlowTracker({
     getHomeAirports: () => homeAirports,
     onEvent: (e) => {
@@ -208,6 +209,13 @@ async function main(): Promise<void> {
     onSourceIp: (ip) => sourceIpHits.set(ip, (sourceIpHits.get(ip) ?? 0) + 1),
     selfProbeIps,
     onProcessMiss,
+    onFlowLimit: () => {
+      const now = Date.now();
+      if (now - lastFlowLimitWarn < 30_000) return; // one notice per 30s, not per packet
+      lastFlowLimitWarn = now;
+      console.warn(`[flows] table full (${MAX_FLOWS}); dropping new flows`);
+      ws.error('capture_error', `Flow table full (${MAX_FLOWS}) — new connections are not shown until some close.`);
+    },
   });
 
   // Packets flowing again means capture recovered from any earlier error.
