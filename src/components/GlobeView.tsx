@@ -2,7 +2,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import * as THREE from 'three';
 import Globe, { type GlobeMethods } from 'react-globe.gl';
 import { useFlightsStore } from '@/store/flights';
-import { useFiltersStore } from '@/store/filters';
+import { flightWorldPos } from '@/lib/flight-pos';
+import { useShallow } from 'zustand/react/shallow';
+import { useFiltersStore, selectFilterData } from '@/store/filters';
 import { getRenderQueueMemo } from '@/lib/render-queue';
 import { flightEndpoints } from '@/lib/arc';
 import {
@@ -15,7 +17,7 @@ import {
   rgba,
 } from '@/lib/globe-color';
 import { globeMaterialFor } from '@/lib/globe-material';
-import { correctedLngOffset, orientPlaneMesh } from '@/lib/mesh-orientation';
+import { orientPlaneMesh } from '@/lib/mesh-orientation';
 import { interpolateArc, arcPoints, greatCircleKm, arcAltitude } from '@/lib/interpolate';
 import {
   createPlaneMesh,
@@ -28,7 +30,6 @@ import {
   updateStrobes,
 } from '@/lib/globe-meshes';
 import { trailPathColors } from '@/lib/trail-color';
-import { lifecyclePose } from '@/lib/lifecycle';
 import { liveProgress } from '@/lib/anim';
 import { reducedMotion } from '@/lib/motion';
 import { showTip, hideTip, flightTipText } from '@/lib/tooltip';
@@ -68,15 +69,18 @@ interface DestDot {
 const _pos = new THREE.Vector3();
 const _fwdHint = new THREE.Vector3();
 
+const POINT_COLOR = () => 'rgba(255,255,255,0.55)';
+
 export default function GlobeView() {
   const globe = useRef<GlobeMethods | undefined>(undefined);
   const flights = useFlightsStore((s) => s.flights);
   const homeAirports = useFlightsStore((s) => s.homeAirports);
   const selectedId = useFlightsStore((s) => s.selectedFlightId);
-  const filters = useFiltersStore();
+  const filters = useFiltersStore(useShallow(selectFilterData));
   const themeId = useFiltersStore((s) => s.theme);
   const theme = THEME_BY_ID[themeId];
   const idleTimer = useRef<number | undefined>(undefined);
+  const rendererRef = useRef<{ forceContextLoss(): void } | null>(null);
 
   // Refs so accessors below can be identity-stable (never trigger layer rebuilds).
   // Kept in sync via effects (not written during render) so the rAF ticker and
@@ -331,29 +335,14 @@ export default function GlobeView() {
   const updateMesh = useCallback(
     (o: THREE.Object3D, f: Flight, g: GlobeApi, now: number, progress: number) => {
       const home = homeById(f.homeAirportId);
-      const ep = flightEndpoints(home, f);
-      // LAN flights orbit home (pinned), never fly out to a destination.
-      const p =
-        f.isLan && home
-          ? { lat: home.lat, lng: home.lng, heading: 0 }
-          : interpolateArc(ep.startLat, ep.startLng, ep.endLat, ep.endLng, progress);
-      const km = f.isLan ? 0 : greatCircleKm(ep.startLat, ep.startLng, ep.endLat, ep.endLng);
-      const alt = f.isLan ? 0.03 : arcAltitude(km) * Math.sin(progress * Math.PI) + 0.006;
-      const pose = lifecyclePose(f, now);
-      const oLat = pose.dLat;
-      const oLng = correctedLngOffset(pose.dLng, p.lat);
-      const c = g.getCoords(p.lat + oLat, p.lng + oLng, alt);
+      const { lat, lng, alt, pose } = flightWorldPos(f, home, now, progress);
+      const c = g.getCoords(lat, lng, alt);
       _pos.set(c.x, c.y, c.z);
       o.position.copy(_pos);
       // Forward hint uses the pose slightly in the future so orbiting planes
       // (hold circles / LAN) face along their actual motion, not just the arc.
-      const np = interpolateArc(ep.startLat, ep.startLng, ep.endLat, ep.endLng, Math.min(1, progress + 0.01));
-      const pose2 = lifecyclePose(f, now + 130);
-      const nc = g.getCoords(
-        np.lat + pose2.dLat,
-        np.lng + correctedLngOffset(pose2.dLng, p.lat),
-        alt,
-      );
+      const next = flightWorldPos(f, home, now + 130, Math.min(1, progress + 0.01));
+      const nc = g.getCoords(next.lat, next.lng, alt);
       _fwdHint.set(nc.x, nc.y, nc.z);
       // Bank into the turn while circling (hold / LAN orbit).
       const banking = !reducedMotion() && (f.phase === 'hold' || (f.isLan && f.phase !== 'landed'));
@@ -426,18 +415,7 @@ export default function GlobeView() {
       let best: Flight | null = null;
       let bestD = radiusPx * radiusPx;
       for (const f of renderedRef.current) {
-        const home = homeById(f.homeAirportId);
-        const ep = flightEndpoints(home, f);
-        const progress = liveProgress(f);
-        const p =
-          f.isLan && home
-            ? { lat: home.lat, lng: home.lng }
-            : interpolateArc(ep.startLat, ep.startLng, ep.endLat, ep.endLng, progress);
-        const km = f.isLan ? 0 : greatCircleKm(ep.startLat, ep.startLng, ep.endLat, ep.endLng);
-        const alt = f.isLan ? 0.03 : arcAltitude(km) * Math.sin(progress * Math.PI) + 0.006;
-        const pose = lifecyclePose(f, now);
-        const lat = p.lat + pose.dLat;
-        const lng = p.lng + correctedLngOffset(pose.dLng, p.lat);
+        const { lat, lng, alt } = flightWorldPos(f, homeById(f.homeAirportId), now);
         // Skip planes on the far side of the globe — they project to valid
         // screen coords but are hidden behind the sphere.
         const c = g.getCoords(lat, lng, alt);
@@ -492,6 +470,54 @@ export default function GlobeView() {
     [findFlightAt],
   );
 
+  // Lights, initial camera, auto-rotate. Refs only, so the callback is stable.
+  const onGlobeReady = useCallback(() => {
+    const g = globe.current;
+    if (!g) return;
+    const scene = g.scene();
+    scene.add(new THREE.AmbientLight(0xffffff, 0.7));
+    const dir = new THREE.DirectionalLight(0xffffff, 0.85);
+    dir.position.set(1, 1, 1);
+    scene.add(dir);
+    const primary = homeRef.current.find((a) => a.id === 'primary') ?? homeRef.current[0];
+    // Always set the plane-visible default altitude — home may not have
+    // arrived yet; the homeAirports effect re-centers when it does.
+    g.pointOfView(
+      { lat: primary?.lat ?? 30, lng: primary?.lng ?? 15, altitude: DEFAULT_ALT },
+      0,
+    );
+    if (primary) homePointedRef.current = true;
+    const c = g.controls() as {
+      autoRotate: boolean;
+      autoRotateSpeed: number;
+      addEventListener: (e: string, cb: () => void) => void;
+    };
+    c.autoRotate = !reducedMotion();
+    c.autoRotateSpeed = 0.15;
+    c.addEventListener('start', () => {
+      userMovedRef.current = true;
+      c.autoRotate = false;
+      clearTimeout(idleTimer.current);
+    });
+    c.addEventListener('end', () => {
+      idleTimer.current = window.setTimeout(() => {
+        if (!useFlightsStore.getState().selectedFlightId && !reducedMotion()) c.autoRotate = true;
+      }, 2500);
+    });
+    rendererRef.current = g.renderer() as unknown as { forceContextLoss(): void };
+  }, []);
+
+  // react-globe.gl disposes the renderer on unmount but doesn't release the
+  // WebGL context; without this, 2D↔3D toggling piles up contexts until the
+  // browser starts dropping the oldest.
+  useEffect(
+    () => () => {
+      clearTimeout(idleTimer.current);
+      rendererRef.current?.forceContextLoss();
+    },
+    [],
+  );
+
   return (
     <div
       ref={containerRef}
@@ -518,40 +544,7 @@ export default function GlobeView() {
         polygonStrokeColor={polygonStrokeColorFn}
         polygonAltitude={0.006}
         polygonsTransitionDuration={0}
-        onGlobeReady={() => {
-          const g = globe.current;
-          if (!g) return;
-          const scene = g.scene();
-          scene.add(new THREE.AmbientLight(0xffffff, 0.7));
-          const dir = new THREE.DirectionalLight(0xffffff, 0.85);
-          dir.position.set(1, 1, 1);
-          scene.add(dir);
-          const primary = homeRef.current.find((a) => a.id === 'primary') ?? homeRef.current[0];
-          // Always set the plane-visible default altitude — home may not have
-          // arrived yet; the homeAirports effect re-centers when it does.
-          g.pointOfView(
-            { lat: primary?.lat ?? 30, lng: primary?.lng ?? 15, altitude: DEFAULT_ALT },
-            0,
-          );
-          if (primary) homePointedRef.current = true;
-          const c = g.controls() as {
-            autoRotate: boolean;
-            autoRotateSpeed: number;
-            addEventListener: (e: string, cb: () => void) => void;
-          };
-          c.autoRotate = !reducedMotion();
-          c.autoRotateSpeed = 0.15;
-          c.addEventListener('start', () => {
-            userMovedRef.current = true;
-            c.autoRotate = false;
-            clearTimeout(idleTimer.current);
-          });
-          c.addEventListener('end', () => {
-            idleTimer.current = window.setTimeout(() => {
-              if (!useFlightsStore.getState().selectedFlightId && !reducedMotion()) c.autoRotate = true;
-            }, 2500);
-          });
-        }}
+        onGlobeReady={onGlobeReady}
         /* trails (throttled) — VPN dashed */
         pathsData={trailData}
         pathPoints={pathPoints}
@@ -581,7 +574,7 @@ export default function GlobeView() {
         pointsData={destData}
         pointLat={pointLat}
         pointLng={pointLng}
-        pointColor={() => 'rgba(255,255,255,0.55)'}
+        pointColor={POINT_COLOR}
         pointAltitude={0.005}
         pointRadius={pointRadius}
         onPointClick={onPointClick}

@@ -12,6 +12,7 @@ import { useToastStore } from '@/store/toasts';
 import { useDiagnosticsStore } from '@/store/diagnostics';
 import { arcProgressLive, STORE_PUSH_MS } from '@/lib/anim';
 import { CRUISE_MS, CRUISE_TARGET, DESCENT_MS, LANDED_TTL_MS } from '@/config';
+import { downloadFile } from '@/lib/utils';
 import { LiveState, parseServerMessage, type LiveFlight } from '@/lib/live-state';
 
 // Control handle — live while the socket is open so the UI (MetricsStrip) can
@@ -20,16 +21,6 @@ export const liveControl: { send: (m: ClientMessage) => void } = { send: () => {
 
 // Reconnect-now handle for the ReconnectingOverlay's "Try now" button.
 export const liveReconnect: { now: () => void } = { now: () => {} };
-
-function downloadNdjson(ndjson: string): void {
-  const blob = new Blob([ndjson], { type: 'application/x-ndjson' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = `netport-radar-${new Date().toISOString().replace(/[:.]/g, '-')}.ndjson`;
-  a.click();
-  URL.revokeObjectURL(url);
-}
 
 export function useLiveFlights(enabled: boolean): void {
   const setFlights = useFlightsStore((s) => s.setFlights);
@@ -139,7 +130,7 @@ export function useLiveFlights(enabled: boolean): void {
         } else if (msg.type === 'reset') {
           resetFlights();
         } else if (msg.type === 'log') {
-          downloadNdjson(msg.ndjson);
+          downloadFile(msg.ndjson, 'application/x-ndjson', 'ndjson');
         } else if (msg.type === 'error') {
           // Fatal (blocking overlay) + sticky banner codes hold the error field;
           // transient capture hiccups surface as a self-dismissing toast.

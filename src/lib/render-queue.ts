@@ -3,7 +3,7 @@
 // Bump priority (keep highest): descent > cruise > taxi > hold > landed.
 
 import type { Flight, FlightPhase } from '@/types';
-import type { FilterState } from '@/store/filters';
+import { FILTER_DATA_KEYS, selectFilterData, type FilterData } from '@/store/filters';
 import { protocolFamily } from './classify';
 import { MAIN_CAP, DNS_CAP } from '@/config';
 
@@ -15,7 +15,7 @@ const PHASE_PRIORITY: Record<FlightPhase, number> = {
   landed: 1,
 };
 
-function matchesProtocolFilters(f: Flight, filters: FilterState): boolean {
+function matchesProtocolFilters(f: Flight, filters: FilterData): boolean {
   switch (protocolFamily(f.detectedProtocol)) {
     case 'vpn':
       return filters.showVPN;
@@ -42,7 +42,7 @@ function matchesProtocolFilters(f: Flight, filters: FilterState): boolean {
   }
 }
 
-export function passesFilters(f: Flight, filters: FilterState): boolean {
+export function passesFilters(f: Flight, filters: FilterData): boolean {
   if (!matchesProtocolFilters(f, filters)) return false;
   if (f.isLan && !filters.showLAN) return false;
   if (f.isIPv6 && !filters.showIPv6) return false;
@@ -70,22 +70,26 @@ export interface RenderQueue {
   offScreenCount: number;
 }
 
-// Ref-equality memo. The flight array changes only at the 10Hz store cadence
-// now, but MapView's and GlobeView's per-frame loops (plus MetricsStrip) all
-// want the queue — without this the filter + double-sort would run several times
-// per frame. Single-entry is enough: every caller reads the same two store refs.
+// Single-entry memo. The flight array changes only at the 10Hz store cadence,
+// but MapView's and GlobeView's per-frame loops (plus MetricsStrip) all want the
+// queue — without this the filter + double-sort would run several times per
+// frame. Filters compare by value on the data keys, so callers passing the
+// whole store state and callers passing a shallow selection share one entry.
 let lastFlights: Flight[] | null = null;
-let lastFilters: FilterState | null = null;
+let lastFilters: FilterData | null = null;
 let lastResult: RenderQueue | null = null;
-export function getRenderQueueMemo(flights: Flight[], filters: FilterState): RenderQueue {
-  if (flights === lastFlights && filters === lastFilters && lastResult) return lastResult;
+const sameFilters = (a: FilterData, b: FilterData) => FILTER_DATA_KEYS.every((k) => a[k] === b[k]);
+export function getRenderQueueMemo(flights: Flight[], filters: FilterData): RenderQueue {
+  if (flights === lastFlights && lastFilters && sameFilters(filters, lastFilters) && lastResult) {
+    return lastResult;
+  }
   lastFlights = flights;
-  lastFilters = filters;
+  lastFilters = selectFilterData(filters);
   lastResult = getRenderQueue(flights, filters);
   return lastResult;
 }
 
-export function getRenderQueue(flights: Flight[], filters: FilterState): RenderQueue {
+export function getRenderQueue(flights: Flight[], filters: FilterData): RenderQueue {
   const mainEligible: Flight[] = [];
   let dnsEligible: Flight[] = [];
 

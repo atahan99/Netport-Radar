@@ -1,14 +1,8 @@
 // server/index.ts
-// netport-radar live capture entry. Wires capture → flow-tracker → ws.
-//
-// HOME LOCATION: behind NAT the captured source IP is private (192.168.x), so
-// it can't be geolocated. To place your home airport we do ONE external lookup
-// of your public IP's location via ip-api.com (city-accurate; geoip-lite's
-// bundled DB is only country-accurate and often mislabels the city). This is
-// the only thing that leaves the machine. Set NETPORT_HOME_LAT / NETPORT_HOME_LNG
-// (+ NETPORT_HOME_LABEL) to skip it entirely.
+// netport-radar live capture entry. Wires capture → flow tracker → WS hub, and
+// decides between inline capture and the privilege-separated broker.
 
-import { execSync, fork, type ChildProcess } from 'child_process';
+import { execSync, fork } from 'child_process';
 import * as os from 'os';
 import net from 'net';
 import { lookup } from 'dns/promises';
@@ -19,7 +13,6 @@ import type { BackendInfo, HomeAirport } from '../src/types';
 import {
   detectBackend,
   detectHomeAirports,
-  geoLookup,
   haversineKm,
   startCapture,
   startDecoder,
@@ -30,6 +23,9 @@ import {
 import { FlowTracker } from './flow-tracker';
 import { WsHub } from './ws';
 import { serveDist } from './static';
+import { resolvePrimaryHome, HOME_PROBE_HOSTS } from './home';
+import { resolveDropTarget, dropPrivileges, assertPrivilegesDropped, type DropTarget } from './privdrop';
+import { superviseCapture } from './capture-supervisor';
 import { startPcapReceiver } from './pcap-socket';
 import { logEvent, exportNdjson, resetLog } from './logger';
 import {
@@ -65,95 +61,6 @@ function getLocalIps(): Set<string> {
     for (const a of addrs ?? []) set.add(a.address);
   }
   return set;
-}
-
-interface IpapiCoResp {
-  latitude: number;
-  longitude: number;
-  city: string;
-  country_code: string;
-  ip: string;
-}
-
-interface IpApiResp {
-  status: string;
-  country: string;
-  countryCode: string;
-  city: string;
-  lat: number;
-  lon: number;
-  query: string;
-}
-
-// Home airport from the public IP — still exactly ONE outbound lookup per
-// session, just HTTPS-first now: ipapi.co (HTTPS) → ip-api.com (HTTP-only free
-// tier) → ipify + local geoip-lite (country-accurate). Env override skips all.
-async function resolvePrimaryHome(): Promise<HomeAirport> {
-  const { NETPORT_HOME_LAT, NETPORT_HOME_LNG, NETPORT_HOME_LABEL } = process.env;
-  if (NETPORT_HOME_LAT && NETPORT_HOME_LNG) {
-    return {
-      id: 'primary',
-      label: NETPORT_HOME_LABEL ?? 'Home',
-      lat: Number(NETPORT_HOME_LAT),
-      lng: Number(NETPORT_HOME_LNG),
-      ip: '',
-      isVpn: false,
-    };
-  }
-  try {
-    const r = await fetch('https://ipapi.co/json/', { signal: AbortSignal.timeout(4000) });
-    const j = (await r.json()) as IpapiCoResp;
-    if (typeof j.latitude === 'number' && typeof j.longitude === 'number') {
-      return {
-        id: 'primary',
-        label: j.city ? `${j.city}, ${j.country_code}` : (j.country_code ?? 'Home'),
-        lat: j.latitude,
-        lng: j.longitude,
-        ip: j.ip ?? '',
-        isVpn: false,
-      };
-    }
-  } catch {
-    /* fall through */
-  }
-  try {
-    const r = await fetch(
-      'http://ip-api.com/json/?fields=status,country,countryCode,city,lat,lon,query',
-      { signal: AbortSignal.timeout(4000) },
-    );
-    const j = (await r.json()) as IpApiResp;
-    if (j.status === 'success') {
-      return {
-        id: 'primary',
-        label: j.city ? `${j.city}, ${j.countryCode}` : j.country,
-        lat: j.lat,
-        lng: j.lon,
-        ip: j.query,
-        isVpn: false,
-      };
-    }
-  } catch {
-    /* fall through to the local DB */
-  }
-  try {
-    const ip = (
-      await (await fetch('https://api.ipify.org', { signal: AbortSignal.timeout(4000) })).text()
-    ).trim();
-    const geo = geoLookup(ip);
-    if (geo) {
-      return {
-        id: 'primary',
-        label: geo.city ? `${geo.city}, ${geo.country}` : geo.country,
-        lat: geo.lat,
-        lng: geo.lng,
-        ip,
-        isVpn: false,
-      };
-    }
-  } catch {
-    /* offline */
-  }
-  return { id: 'primary', label: 'Local', lat: 0, lng: 0, ip: '', isVpn: false };
 }
 
 function openBrowser(url: string): void {
@@ -197,63 +104,6 @@ function lanIp(): string | null {
   return null;
 }
 
-// Privilege separation: capturing needs root, but the long-running network-facing
-// servers (WS control channel, HTTP, flow tracker) should not. When started via
-// sudo on a POSIX host we keep the root-only work (tshark/tcpdump spawn + lsof) in
-// a small broker child and drop the main process to the invoking user. If we
-// can't (not root, not via sudo, Windows, or opted out), everything runs inline
-// exactly as before — no behavior change.
-interface DropTarget {
-  uid: number;
-  gid: number;
-}
-
-function resolveDropTarget(): DropTarget | null {
-  if (process.env.NETPORT_NO_PRIVDROP) return null;
-  if (process.platform === 'win32') return null;
-  if (typeof process.getuid !== 'function' || process.getuid() !== 0) return null;
-  const uid = Number(process.env.SUDO_UID);
-  const gid = Number(process.env.SUDO_GID);
-  // Need a real non-root target (sudo from a normal user sets SUDO_UID/GID).
-  if (!Number.isInteger(uid) || uid <= 0 || !Number.isInteger(gid) || gid < 0) return null;
-  return { uid, gid };
-}
-
-function dropPrivileges(target: DropTarget): void {
-  try {
-    process.setgid?.(target.gid);
-    try {
-      process.setgroups?.([target.gid]); // shed supplementary groups (e.g. wheel)
-    } catch {
-      /* non-fatal on some platforms */
-    }
-    process.setuid?.(target.uid); // must be last — can't change gid after
-    // sudo may leave HOME=/root; decoders (tshark prefs) need the user's own.
-    const me = os.userInfo();
-    process.env.HOME = me.homedir;
-    process.env.USER = me.username;
-    console.log(
-      `[security] dropped to uid=${target.uid} gid=${target.gid}; capture runs in the root broker.`,
-    );
-  } catch (e) {
-    // Fail closed: the network-facing servers must never keep running as root.
-    // Exiting also stops the broker (it exits when the IPC channel closes).
-    console.error('[security] privilege drop failed — refusing to run the servers as root:', e);
-    console.error('[security] fix sudo (SUDO_UID/GID/USER) or opt out with NETPORT_NO_PRIVDROP=1.');
-    process.exit(1);
-  }
-}
-
-function assertPrivilegesDropped(brokered: boolean): void {
-  if (typeof process.getuid !== 'function') return;
-  const uid = process.getuid();
-  console.log(`[security] effective uid=${uid}${brokered ? ' (brokered; capture in root child)' : ''}`);
-  if (brokered && uid === 0) {
-    console.error('[security] still root after the privilege drop — exiting.');
-    process.exit(1);
-  }
-}
-
 async function main(): Promise<void> {
   if (!(await isPortFree(WS_PORT))) {
     console.error(
@@ -292,7 +142,7 @@ async function main(): Promise<void> {
   // flights. Resolved once, best-effort.
   const selfProbeIps = new Set<string>();
   void (async () => {
-    for (const host of ['ipapi.co', 'ip-api.com', 'api.ipify.org']) {
+    for (const host of HOME_PROBE_HOSTS) {
       try {
         for (const a of await lookup(host, { all: true })) selfProbeIps.add(a.address);
       } catch {
@@ -315,7 +165,7 @@ async function main(): Promise<void> {
   // Single source of truth for homeAirports: the ip-api primary, VPN-flagged if
   // we're on a tunnel interface, plus any extra clusters of observed *public*
   // source IPs (multi-homed hosts). Behind home NAT the source IP is private →
-  // geoLookup returns null → no extras, exactly as before. Only broadcasts when
+  // geoLookup returns null → no extras. Only broadcasts when
   // the set actually changes (the 10s timer is otherwise a no-op).
   function publishHomes(): void {
     if (!primaryHome) return;
@@ -388,58 +238,27 @@ async function main(): Promise<void> {
 
   // Inline path (no privilege drop): spawn capture here and poll lsof here.
   function startInlineCapture(): CaptureControl {
-    let captureProc: ChildProcess | null = null;
-    let permissionDenied = false;
-    let restartCount = 0;
-    let lastRestart = 0;
-
-    const onCaptureError = (msg: string) => {
-      console.error('[capture]', msg);
-      if (/permission|denied|bpf|root|operation not permitted/i.test(msg)) {
-        permissionDenied = true; // a restart won't fix this — let the banner stand
-        ws.error('capture_permission', 'No capture permission — run with sudo (see README).');
-      } else {
-        ws.error('capture_error', msg.slice(0, 200));
-      }
-    };
-
-    // Supervisor: a capture process that dies (sleep/wake, interface flap) is
-    // restarted once; a second death within 30s is declared dead. An intentional
-    // kill (switch/shutdown) is distinguished by proc identity.
-    function spawnCapture(): void {
-      const proc = startCapture(backend, iface, getLocalIps(), ingest, onCaptureError);
-      captureProc = proc;
-      if (!proc) {
-        ws.error('no_backend', 'No capture backend available — install Wireshark (tshark).');
-        return;
-      }
-      proc.on('exit', () => {
-        if (proc !== captureProc || shuttingDown || permissionDenied) return;
-        const now = Date.now();
-        const recent = now - lastRestart < 30_000;
-        if (recent && restartCount >= 1) {
-          ws.error('capture_dead', 'Capture keeps dying — check permissions or the interface (see README).');
-          return;
-        }
-        restartCount = recent ? restartCount + 1 : 1;
-        lastRestart = now;
-        ws.error('capture_error', 'Capture process exited — restarting…');
-        setTimeout(() => {
-          if (proc === captureProc && !shuttingDown && !permissionDenied) spawnCapture();
-        }, 2000);
-      });
-    }
-    spawnCapture();
+    const sup = superviseCapture(
+      (onError) => startCapture(backend, iface, getLocalIps(), ingest, onError),
+      {
+        permission: () =>
+          ws.error('capture_permission', 'No capture permission — run with sudo (see README).'),
+        error: (msg) => {
+          console.error('[capture]', msg);
+          ws.error('capture_error', msg);
+        },
+        restarting: () => ws.error('capture_error', 'Capture process exited — restarting…'),
+        dead: () =>
+          ws.error('capture_dead', 'Capture keeps dying — check permissions or the interface (see README).'),
+        noBackend: () =>
+          ws.error('no_backend', 'No capture backend available — install Wireshark (tshark).'),
+      },
+    );
     startProcessPolling();
     return {
-      switchTo: () => {
-        permissionDenied = false;
-        restartCount = 0;
-        captureProc?.kill(); // its exit handler no-ops once spawnCapture reassigns
-        spawnCapture();
-      },
+      switchTo: () => sup.restart(), // spawn reads the already-updated `iface`
       stop: () => {
-        captureProc?.kill();
+        sup.stop();
         stopProcessPolling();
       },
     };

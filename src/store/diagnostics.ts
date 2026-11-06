@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { downloadFile } from '@/lib/utils'
 
 export interface DiagnosticEntry {
   at: number
@@ -96,11 +97,5 @@ export const useDiagnosticsStore = create<DiagnosticsStore>((set, get) => ({
 
 export const exportDiagnostics = (): void => {
   const json = JSON.stringify(useDiagnosticsStore.getState().snapshot(), null, 2)
-  const blob = new Blob([json], { type: 'application/json' })
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = `netport-radar-diagnostics-${new Date().toISOString().replace(/[:.]/g, '-')}.json`
-  a.click()
-  URL.revokeObjectURL(url)
+  downloadFile(json, 'application/json', 'json', 'diagnostics')
 }

@@ -13,6 +13,7 @@
 import net from 'net';
 import type { ChildProcess } from 'child_process';
 import { startRawCapture, type CaptureBackend } from './capture';
+import { superviseCapture } from './capture-supervisor';
 import { startProcessPolling, noteLookupMiss, type ProcEntry } from './process-names';
 
 export type BrokerOut =
@@ -36,6 +37,7 @@ let iface = 'en0';
 let sockPath = '';
 let nonce = '';
 let initialized = false;
+let sup: ReturnType<typeof superviseCapture> | null = null;
 
 // The parent drops to the user right after forking us, so after 'init' its
 // messages are untrusted input to a root process: init is accepted once (sent
@@ -45,59 +47,34 @@ const IFACE_RE = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$/;
 const BACKENDS: ReadonlySet<string> = new Set(['tshark', 'tcpdump', 'pcap']);
 const dropUser = process.env.SUDO_USER ?? '';
 const dropUserOk = /^[a-z_][a-z0-9_.-]*$/i.test(dropUser) && dropUser !== 'root';
-let proc: ChildProcess | null = null;
-let shuttingDown = false;
-let permissionDenied = false;
-let restartCount = 0;
-let lastRestart = 0;
 
-function onErr(msg: string): void {
-  if (/permission|denied|bpf|root|operation not permitted/i.test(msg)) {
-    permissionDenied = true; // a restart won't fix this
-    send({ t: 'permission' });
-  } else {
-    send({ t: 'err', msg: msg.slice(0, 200) });
-  }
-}
-
-// Supervisor mirrors index.ts's old behavior: a capture that dies (sleep/wake,
-// interface flap) restarts once; a second death within 30s is declared dead. An
-// intentional kill (switch/stop) is distinguished by proc identity.
-function spawnCapture(): void {
-  const p = startRawCapture(backend, iface, dropUser, onErr);
-  proc = p;
-  if (!p) {
-    send({ t: 'no_backend' });
-    return;
-  }
+// Raw capture whose output streams to the parent over the nonce-gated socket.
+function spawnRaw(onError: (msg: string) => void): ChildProcess | null {
+  const p = startRawCapture(backend, iface, dropUser, onError);
+  if (!p) return null;
   const conn = net.createConnection(sockPath, () => {
     conn.write(`${nonce}\n`);
     p.stdout!.pipe(conn);
   });
   conn.on('error', (e) => {
-    onErr(`capture stream: ${e.message}`);
+    onError(`capture stream: ${e.message}`);
     p.kill();
   });
-  p.on('exit', () => {
-    if (p !== proc || shuttingDown || permissionDenied) return;
-    const now = Date.now();
-    const recent = now - lastRestart < 30_000;
-    if (recent && restartCount >= 1) {
-      send({ t: 'dead' });
-      return;
-    }
-    restartCount = recent ? restartCount + 1 : 1;
-    lastRestart = now;
-    send({ t: 'restarting' });
-    setTimeout(() => {
-      if (p === proc && !shuttingDown && !permissionDenied) spawnCapture();
-    }, 2000);
+  return p;
+}
+
+function startSupervisor(): void {
+  sup = superviseCapture(spawnRaw, {
+    permission: () => send({ t: 'permission' }),
+    error: (msg) => send({ t: 'err', msg }),
+    restarting: () => send({ t: 'restarting' }),
+    dead: () => send({ t: 'dead' }),
+    noBackend: () => send({ t: 'no_backend' }),
   });
 }
 
 function stop(): void {
-  shuttingDown = true;
-  proc?.kill();
+  sup?.stop();
   process.exit(0);
 }
 
@@ -105,11 +82,11 @@ process.on('message', (m: BrokerIn) => {
   if (m.t === 'init') {
     if (initialized) return;
     if (!BACKENDS.has(m.backend) || !IFACE_RE.test(m.iface) || typeof m.sockPath !== 'string' || typeof m.nonce !== 'string') {
-      onErr('broker: invalid init');
+      send({ t: 'err', msg: 'broker: invalid init' });
       return;
     }
     if (m.backend === 'tcpdump' && !dropUserOk) {
-      onErr('broker: no non-root SUDO_USER for tcpdump -Z — refusing to dissect as root');
+      send({ t: 'err', msg: 'broker: no non-root SUDO_USER for tcpdump -Z — refusing to dissect as root' });
       return;
     }
     initialized = true;
@@ -117,15 +94,12 @@ process.on('message', (m: BrokerIn) => {
     iface = m.iface;
     sockPath = m.sockPath;
     nonce = m.nonce;
-    spawnCapture();
+    startSupervisor();
     startProcessPolling((entries) => send({ t: 'proc', entries }));
   } else if (m.t === 'switch') {
     if (!initialized || !IFACE_RE.test(m.iface)) return;
     iface = m.iface;
-    permissionDenied = false;
-    restartCount = 0;
-    proc?.kill(); // its exit handler no-ops once spawnCapture reassigns proc
-    spawnCapture();
+    sup?.restart();
   } else if (m.t === 'boost') {
     noteLookupMiss();
   } else if (m.t === 'stop') {

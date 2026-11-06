@@ -41,7 +41,6 @@ export function makeFlight(over: Partial<Flight> = {}): Flight {
     direction: 'outbound',
     isLan: false,
     startedAt: 0,
-    hostnameResolved: true,
     ...over,
   };
 }

@@ -96,3 +96,17 @@ describe('getRenderQueueMemo', () => {
     expect(c).not.toBe(a);
   });
 });
+
+describe('getRenderQueueMemo keys on filter values, not object identity', () => {
+  it('returns the cached queue for an equal filter selection', async () => {
+    const { getRenderQueueMemo } = await import('../src/lib/render-queue');
+    const { selectFilterData } = await import('../src/store/filters');
+    const flights = [makeFlight({ id: 'A' })];
+    const full = makeFilters();
+    const a = getRenderQueueMemo(flights, full);
+    const b = getRenderQueueMemo(flights, selectFilterData(full));
+    expect(b).toBe(a);
+    const c = getRenderQueueMemo(flights, { ...selectFilterData(full), showHTTPS: false });
+    expect(c).not.toBe(a);
+  });
+});

@@ -84,6 +84,35 @@ export type FilterDataKey =
   | 'isolatedCountry'
   | 'airportFilter';
 
+// Just the fields that decide which flights render. Components that only need
+// these subscribe via useShallow(selectFilterData) so drawer/legend/theme
+// toggles don't re-render them.
+export type FilterData = Pick<FilterState, FilterDataKey>;
+export const FILTER_DATA_KEYS: readonly FilterDataKey[] = [
+  'showHTTPS',
+  'showHTTP',
+  'showVPN',
+  'showDNS',
+  'showQUIC',
+  'showUDP',
+  'showICMP',
+  'showSSH',
+  'showStreaming',
+  'showGaming',
+  'showLAN',
+  'showIPv6',
+  'dnsDensity',
+  'direction',
+  'appSearch',
+  'isolatedCountry',
+  'airportFilter',
+];
+export function selectFilterData(s: FilterData): FilterData {
+  const out = {} as Record<FilterDataKey, unknown>;
+  for (const k of FILTER_DATA_KEYS) out[k] = s[k];
+  return out as FilterData;
+}
+
 const DEFAULTS = {
   showHTTPS: true,
   showHTTP: true,

@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, afterEach } from 'vitest';
-import { render, screen, cleanup } from '@testing-library/react';
+import { render, screen, cleanup, act } from '@testing-library/react';
 import SceneAnnouncer from '../src/components/SceneAnnouncer';
 import { useFlightsStore } from '../src/store/flights';
 import { makeFlight } from './helpers';
@@ -33,5 +33,14 @@ describe('<SceneAnnouncer>', () => {
     const status = screen.getByRole('status');
     expect(status.textContent).toContain('TCP-AAA');
     expect(status.textContent).toContain('youtube.com');
+  });
+
+  it('re-announces when the selected flight\'s hostname resolves later', () => {
+    const f = makeFlight({ id: 'TCP-BBB', hostname: '142.250.1.1' });
+    useFlightsStore.setState({ flights: [f], selectedFlightId: f.id });
+    render(<SceneAnnouncer />);
+    expect(screen.getByRole('status').textContent).toContain('142.250.1.1');
+    act(() => useFlightsStore.setState({ flights: [{ ...f, hostname: 'google.com' }] }));
+    expect(screen.getByRole('status').textContent).toContain('google.com');
   });
 });

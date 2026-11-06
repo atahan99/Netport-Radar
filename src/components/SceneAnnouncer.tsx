@@ -23,14 +23,20 @@ function describe(f: Flight): string {
 export default function SceneAnnouncer() {
   const selectedId = useFlightsStore((s) => s.selectedFlightId);
   const viewMode = useFiltersStore((s) => s.viewMode);
+  // The hostname often resolves (SNI / reverse DNS) after the user selects a
+  // flight; re-announce once when it does.
+  const hostname = useFlightsStore(
+    (s) => (selectedId ? s.flights.find((x) => x.id === selectedId)?.hostname : undefined),
+  );
 
-  // Snapshot the description when the selection changes (not on every store push),
-  // so the live region announces a flight once when the user picks it.
+  // Snapshot the description when the selection (or its hostname) changes, not
+  // on every store push, so the live region doesn't chatter.
   const msg = useMemo(() => {
     if (!selectedId) return '';
     const f = useFlightsStore.getState().flights.find((x) => x.id === selectedId);
     return f ? describe(f) : '';
-  }, [selectedId]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- hostname is a re-announce trigger
+  }, [selectedId, hostname]);
 
   return (
     <>

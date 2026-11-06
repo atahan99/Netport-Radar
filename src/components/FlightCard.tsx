@@ -1,12 +1,11 @@
 import { useEffect, useLayoutEffect, useRef } from 'react';
 import { Pin, PinOff, X } from 'lucide-react';
-import { liveProgress } from '@/lib/anim';
 import { useFlightsStore } from '@/store/flights';
 import { useFiltersStore } from '@/store/filters';
 import { useBackendStore } from '@/store/backend';
 import { mapRef, globeRef, flightCardRef } from '@/lib/view-refs';
-import { flightEndpoints } from '@/lib/arc';
-import { interpolateArc } from '@/lib/interpolate';
+import { flightWorldPos } from '@/lib/flight-pos';
+import { liveProgress } from '@/lib/anim';
 import { protocolBadgeClass, PROTOCOL_LABELS } from '@/lib/classify';
 import { PHASE_META } from '@/lib/phase';
 import { fmtBytes, fmtRate, fmtDur } from '@/lib/format';
@@ -26,8 +25,7 @@ interface ScreenPos {
 }
 
 function anchoredPos(f: Flight, home: HomeAirport | undefined, is2d: boolean): ScreenPos | null {
-  const ep = flightEndpoints(home, f);
-  const p = interpolateArc(ep.startLat, ep.startLng, ep.endLat, ep.endLng, liveProgress(f));
+  const p = flightWorldPos(f, home, performance.now());
   if (is2d) {
     const map = mapRef.current;
     if (!map) return null;
@@ -36,7 +34,7 @@ function anchoredPos(f: Flight, home: HomeAirport | undefined, is2d: boolean): S
   }
   const g = globeRef.current;
   if (!g) return null;
-  const sc = g.getScreenCoords(p.lat, p.lng, 0.02);
+  const sc = g.getScreenCoords(p.lat, p.lng, p.alt);
   let opacity = 1;
   try {
     const P = g.getCoords(p.lat, p.lng, 0);

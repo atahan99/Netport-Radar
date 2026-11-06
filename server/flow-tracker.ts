@@ -173,7 +173,6 @@ export class FlowTracker {
       keep.flight.hostname = a.hostname;
       keep.flight.sni = a.sni;
       keep.hostnameResolved = true;
-      keep.flight.hostnameResolved = true;
     }
     if (absorb.processResolved && !keep.processResolved) {
       keep.flight.process = a.process;
@@ -297,7 +296,6 @@ export class FlowTracker {
       f.hostname = p.host;
       f.sni = p.host;
       flow.hostnameResolved = true;
-      f.hostnameResolved = true;
       if (flow.opened) this.opts.onEvent({ event: 'hostname', id: f.id, hostname: p.host, sni: p.host });
       this.maybeReclassifyDoH(flow);
       this.tryRekeyByHostname(flow, key);
@@ -392,7 +390,6 @@ export class FlowTracker {
       direction: p.direction,
       isLan: lan,
       startedAt: now,
-      hostnameResolved: false,
     };
 
     // async reverse DNS (in case no SNI/host comes through)
@@ -402,7 +399,6 @@ export class FlowTracker {
         if (!flow || flow.hostnameResolved || name === remoteIp) return;
         flow.flight.hostname = name;
         flow.hostnameResolved = true;
-        flow.flight.hostnameResolved = true;
         // Process livery (brand color) wins; only hash the hostname when the
         // owning process is still unknown.
         if (!flow.processResolved) flow.flight.liveryColor = liveryColor(name);

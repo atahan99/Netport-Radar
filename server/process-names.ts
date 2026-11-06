@@ -63,7 +63,7 @@ function poll(): void {
   });
 }
 
-function applyLsofOutput(out: string): void {
+export function applyLsofOutput(out: string): void {
   const next = new Map<string, ProcEntry>();
   let pid = 0;
   let command = '';
@@ -89,14 +89,20 @@ function applyLsofOutput(out: string): void {
     }
   }
   const now = Date.now();
+  // Rows lsof reports now. Retained rows get merged into `next` below, so the
+  // retention bookkeeping must key off this set, not `next` — otherwise every
+  // poll re-arms the clock and closed sockets stay attributed forever.
+  const live = new Set(next.keys());
   for (const [key, entry] of table) {
-    if (!next.has(key)) staleRetain.set(key, { entry, expiresAt: now + PROCESS_RETAIN_MS });
+    if (!live.has(key) && !staleRetain.has(key)) {
+      staleRetain.set(key, { entry, expiresAt: now + PROCESS_RETAIN_MS });
+    }
   }
+  for (const key of live) staleRetain.delete(key);
   for (const [key, { entry, expiresAt }] of staleRetain) {
     if (expiresAt <= now) staleRetain.delete(key);
-    else if (!next.has(key)) next.set(key, entry);
+    else next.set(key, entry);
   }
-  for (const key of next.keys()) staleRetain.delete(key);
 
   if (next.size > 0) {
     table = next;
