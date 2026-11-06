@@ -13,5 +13,6 @@ export function downloadFile(content: string, type: string, ext: string, suffix 
   a.href = url;
   a.download = `netport-radar${suffix ? `-${suffix}` : ''}-${new Date().toISOString().replace(/[:.]/g, '-')}.${ext}`;
   a.click();
-  URL.revokeObjectURL(url);
+  // Revoking synchronously can cancel the download in some browsers.
+  setTimeout(() => URL.revokeObjectURL(url), 0);
 }

@@ -15,7 +15,14 @@ export const useFlightsStore = create<FlightsStore>((set) => ({
   homeAirports: [],
   selectedFlightId: null,
 
-  setFlights: (flights) => set({ flights }),
+  // A pruned or reset flight can't stay selected (it would keep auto-rotate off
+  // and swallow Esc), so drop a selection whose flight is gone.
+  setFlights: (flights) =>
+    set((s) =>
+      s.selectedFlightId && !flights.some((f) => f.id === s.selectedFlightId)
+        ? { flights, selectedFlightId: null }
+        : { flights },
+    ),
   setHomeAirports: (homeAirports) => set({ homeAirports }),
   selectFlight: (selectedFlightId) => set({ selectedFlightId }),
 }));

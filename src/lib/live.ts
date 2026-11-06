@@ -22,12 +22,26 @@ export const liveControl: { send: (m: ClientMessage) => void } = { send: () => {
 // Reconnect-now handle for the ReconnectingOverlay's "Try now" button.
 export const liveReconnect: { now: () => void } = { now: () => {} };
 
+// Token only present when the server is bound beyond loopback (it rides the
+// page URL from the server's printed link). Move it into sessionStorage and out
+// of the address bar so it doesn't linger in history, screenshots or exports.
+const TOKEN_KEY = 'netport-radar:token';
+function stashUrlToken(): void {
+  const url = new URL(location.href);
+  const token = url.searchParams.get('token');
+  if (token === null) return;
+  sessionStorage.setItem(TOKEN_KEY, token);
+  url.searchParams.delete('token');
+  history.replaceState(history.state, '', url);
+}
+
 export function useLiveFlights(enabled: boolean): void {
   const setFlights = useFlightsStore((s) => s.setFlights);
   const setHomeAirports = useFlightsStore((s) => s.setHomeAirports);
 
   useEffect(() => {
     if (!enabled) return;
+    stashUrlToken();
 
     const state = new LiveState();
     const flights = state.flights;
@@ -44,7 +58,7 @@ export function useLiveFlights(enabled: boolean): void {
     const resetFlights = () => {
       state.clear();
       arcProgressLive.clear();
-      useFlightsStore.getState().selectFlight(null);
+      useFlightsStore.getState().selectFlight(null); // ids may collide after a server restart
       pushPending = true;
     };
 
@@ -92,11 +106,9 @@ export function useLiveFlights(enabled: boolean): void {
     const connect = () => {
       conn.bumpAttempt(); // count each real attempt (drives the overlay's counter)
       useDiagnosticsStore.getState().setWsState('connecting');
-      // Token only present when the server is bound beyond loopback (it rides
-      // the page URL from the server's printed link).
-      const token = new URLSearchParams(location.search).get('token');
+      const token = sessionStorage.getItem(TOKEN_KEY);
       const sock = new WebSocket(
-        `ws://${location.hostname}:8090${token ? `/?token=${encodeURIComponent(token)}` : ''}`,
+        `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.hostname}:8090${token ? `/?token=${encodeURIComponent(token)}` : ''}`,
       );
       ws = sock;
       // Every handler checks it still belongs to the current socket: a socket
@@ -105,7 +117,7 @@ export function useLiveFlights(enabled: boolean): void {
       const current = () => ws === sock;
       sock.onopen = () => {
         if (!current()) return;
-        conn.setReconnecting(false);
+        conn.connected();
         backend.setOnline(true);
         useDiagnosticsStore.getState().setWsState('connected');
         liveControl.send = (m) => sock.send(JSON.stringify(m));

@@ -28,7 +28,9 @@ export default function ReconnectingOverlay() {
           Dismiss
         </Button>
       </div>
-      <div className="absolute bottom-4 text-[10px] text-zinc-700">demo: press R to toggle</div>
+      {import.meta.env.VITE_DEMO === '1' && (
+        <div className="absolute bottom-4 text-[10px] text-zinc-500">demo: press R to toggle</div>
+      )}
     </div>
   );
 }

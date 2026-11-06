@@ -89,7 +89,8 @@ export const useDiagnosticsStore = create<DiagnosticsStore>((set, get) => ({
       chunkErrors: s.chunkErrors,
       entries: s.entries,
       userAgent: typeof navigator !== 'undefined' ? navigator.userAgent : '',
-      location: typeof location !== 'undefined' ? location.href : '',
+      // origin + path only: the query can carry the access token
+      location: typeof location !== 'undefined' ? location.origin + location.pathname : '',
       demo: import.meta.env.VITE_DEMO === '1',
     }
   },

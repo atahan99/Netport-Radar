@@ -6,11 +6,13 @@ interface ConnectionStore {
   attempt: number;
   setReconnecting: (v: boolean) => void;
   bumpAttempt: () => void;
+  connected: () => void;
 }
 
 export const useConnectionStore = create<ConnectionStore>((set) => ({
   reconnecting: false,
-  attempt: 1,
-  setReconnecting: (reconnecting) => set({ reconnecting, attempt: 1 }),
+  attempt: 0, // connection attempts since the last successful connect
+  setReconnecting: (reconnecting) => set({ reconnecting }),
   bumpAttempt: () => set((s) => ({ attempt: s.attempt + 1 })),
+  connected: () => set({ reconnecting: false, attempt: 0 }),
 }));

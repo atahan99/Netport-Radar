@@ -47,6 +47,8 @@ export function Board() {
   };
   const rows = lists[tab];
   const activeLabel = TABS.find((t) => t.id === tab)!.label;
+  // Roving tabindex: one tab stop for the list (the selected row, else the first).
+  const tabStop = rows.some((f) => f.id === selectedId) ? selectedId : rows[0]?.id;
   const homeOf = (f: Flight) => homeAirports.find((a) => a.id === f.homeAirportId);
 
   return (
@@ -98,6 +100,7 @@ export function Board() {
                 key={f.id}
                 role="option"
                 aria-selected={selectedId === f.id}
+                tabIndex={f.id === tabStop ? 0 : -1}
                 aria-label={rowLabel(f, !!home?.isVpn)}
                 title={f.hostname || f.dstIp}
                 onClick={() => {
@@ -116,7 +119,7 @@ export function Board() {
                 className={cn(
                   'flex w-full items-center gap-2 px-3 py-1.5 text-left font-mono text-[11px] outline-none hover:bg-zinc-900/70 focus-visible:bg-zinc-900 focus-visible:ring-1 focus-visible:ring-zinc-600',
                   selectedId === f.id && 'bg-zinc-900',
-                  landed && 'text-zinc-600 line-through opacity-70',
+                  landed && 'text-zinc-500 line-through opacity-70',
                 )}
               >
                 <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: f.liveryColor }} />
