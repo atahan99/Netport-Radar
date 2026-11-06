@@ -17,9 +17,7 @@ export default defineConfig({
       // (same rationale as excluding src/components).
       exclude: [
         'server/index.ts',
-        'server/process-names.ts',
         'src/lib/demo.ts',
-        'src/lib/live.ts',
         'src/lib/anim.ts',
         'src/lib/globe-meshes.ts',
         'src/lib/icons.ts',
