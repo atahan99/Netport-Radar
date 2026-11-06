@@ -12,7 +12,8 @@ import { execSync, fork, type ChildProcess } from 'child_process';
 import * as os from 'os';
 import net from 'net';
 import { lookup } from 'dns/promises';
-import { writeFileSync, mkdirSync } from 'fs';
+import { writeFileSync, mkdirSync, mkdtempSync, chownSync, rmSync } from 'fs';
+import { randomBytes } from 'crypto';
 import { join } from 'path';
 import type { BackendInfo, HomeAirport } from '../src/types';
 import {
@@ -21,12 +22,15 @@ import {
   geoLookup,
   haversineKm,
   startCapture,
+  startDecoder,
   type CaptureBackend,
   type RawPacket,
+  type Decoder,
 } from './capture';
 import { FlowTracker } from './flow-tracker';
 import { WsHub } from './ws';
 import { serveDist } from './static';
+import { startPcapReceiver } from './pcap-socket';
 import { logEvent, exportNdjson, resetLog } from './logger';
 import {
   startProcessPolling,
@@ -199,18 +203,26 @@ function lanIp(): string | null {
 // a small broker child and drop the main process to the invoking user. If we
 // can't (not root, not via sudo, Windows, or opted out), everything runs inline
 // exactly as before — no behavior change.
-function resolveDropTarget(): { uid: number; gid: number } | null {
+interface DropTarget {
+  uid: number;
+  gid: number;
+  user: string; // for tcpdump -Z
+}
+
+function resolveDropTarget(): DropTarget | null {
   if (process.env.NETPORT_NO_PRIVDROP) return null;
   if (process.platform === 'win32') return null;
   if (typeof process.getuid !== 'function' || process.getuid() !== 0) return null;
   const uid = Number(process.env.SUDO_UID);
   const gid = Number(process.env.SUDO_GID);
-  // Need a real non-root target (sudo from a normal user sets SUDO_UID/GID).
+  const user = process.env.SUDO_USER ?? '';
+  // Need a real non-root target (sudo from a normal user sets SUDO_UID/GID/USER).
   if (!Number.isInteger(uid) || uid <= 0 || !Number.isInteger(gid) || gid < 0) return null;
-  return { uid, gid };
+  if (!/^[a-z_][a-z0-9_.-]*$/i.test(user) || user === 'root') return null;
+  return { uid, gid, user };
 }
 
-function dropPrivileges(target: { uid: number; gid: number }): void {
+function dropPrivileges(target: DropTarget): void {
   try {
     process.setgid?.(target.gid);
     try {
@@ -219,6 +231,10 @@ function dropPrivileges(target: { uid: number; gid: number }): void {
       /* non-fatal on some platforms */
     }
     process.setuid?.(target.uid); // must be last — can't change gid after
+    // sudo may leave HOME=/root; decoders (tshark prefs) need the user's own.
+    const me = os.userInfo();
+    process.env.HOME = me.homedir;
+    process.env.USER = me.username;
     console.log(
       `[security] dropped to uid=${target.uid} gid=${target.gid}; capture runs in the root broker.`,
     );
@@ -437,15 +453,26 @@ async function main(): Promise<void> {
 
   // Brokered path: fork the root broker, wire its IPC into the tracker/WS, then
   // drop this process to the invoking user. The broker owns tshark + lsof.
-  function startBrokeredCapture(target: { uid: number; gid: number }): CaptureControl {
+  async function startBrokeredCapture(target: DropTarget): Promise<CaptureControl> {
+    // Still root here. The pcap socket lives in a fresh 0700 dir handed to the
+    // invoking user, so after the drop only we (and root) can reach it.
+    const sockDir = mkdtempSync(join(os.tmpdir(), 'netport-'));
+    chownSync(sockDir, target.uid, target.gid);
+    const sockPath = join(sockDir, 'pcap.sock');
+    const nonce = randomBytes(16).toString('hex');
+    let decoder: Decoder | null = null;
+    const pcapServer = await startPcapReceiver(sockPath, nonce, (sock) => {
+      decoder?.stop(); // a new capture instance (restart / iface switch) replaces the old stream
+      decoder = startDecoder(backend, sock, getLocalIps(), ingest, (msg) =>
+        ws.error('capture_error', msg.slice(0, 200)),
+      );
+    });
+
     const broker = fork(join(import.meta.dirname, 'priv-broker.ts'), [], {
       stdio: ['inherit', 'inherit', 'inherit', 'ipc'],
     });
     broker.on('message', (m: BrokerOut) => {
       switch (m.t) {
-        case 'pkts':
-          for (const p of m.pkts) ingest(p);
-          break;
         case 'proc':
           setProcessTable(m.entries);
           break;
@@ -476,7 +503,7 @@ async function main(): Promise<void> {
         /* broker gone */
       }
     };
-    sendBroker({ t: 'init', backend, iface });
+    sendBroker({ t: 'init', backend, iface, sockPath, nonce, dropUser: target.user });
     sendProcessBoost = () => sendBroker({ t: 'boost' }); // the broker owns lsof
     dropPrivileges(target); // everything below this line runs as the invoking user
     assertPrivilegesDropped(true, ws);
@@ -485,13 +512,16 @@ async function main(): Promise<void> {
       stop: () => {
         sendBroker({ t: 'stop' });
         broker.kill();
+        decoder?.stop();
+        pcapServer.close();
+        rmSync(sockDir, { recursive: true, force: true });
       },
     };
   }
 
   const dropTarget = resolveDropTarget();
   const capture: CaptureControl = dropTarget
-    ? startBrokeredCapture(dropTarget)
+    ? await startBrokeredCapture(dropTarget)
     : startInlineCapture();
   if (!dropTarget) assertPrivilegesDropped(false, ws);
 
