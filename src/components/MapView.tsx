@@ -163,13 +163,10 @@ export default function MapView() {
       const rendered = [...mainQueue, ...dnsQueue];
 
       // Chip declutter: unknown-geo flights never get chips (they stack on the
-      // shelf). Below zoom 3 no chips, mid zoom at most TOP_CHIPS, and at every
-      // zoom a chip that would overlap a higher-priority one is hidden. Runs
-      // before the signature skip: panning/zooming moves chips on screen.
-      const chipZoom = map.getZoom();
-      if (chipZoom < 3) {
-        topChips = new Set();
-      } else {
+      // shelf). Below zoom 5 at most TOP_CHIPS, and at every zoom a chip that
+      // would overlap a higher-priority one is hidden. Runs before the
+      // signature skip: panning/zooming moves chips on screen.
+      {
         const boxes: ChipBox[] = [];
         const ranked = rendered
           .filter((f) => f.geoConfidence !== 'none' && markers.has(f.id))
@@ -182,9 +179,9 @@ export default function MapView() {
           const last = markers.get(f.id)!.last;
           const pt = map.project([last.lng, last.lat]);
           // Chip sits above the plane icon (~10px) with a 4px gap.
-          boxes.push({ id: f.id, x: pt.x, y: pt.y - 14, ...chipSize(`${f.id} ${geoFlagLabel(f)}`) });
+          boxes.push({ id: f.id, x: pt.x, y: pt.y - 12, ...chipSize(`${f.id} ${geoFlagLabel(f)}`) });
         }
-        topChips = placeChips(boxes, chipZoom >= 5 ? Infinity : TOP_CHIPS);
+        topChips = placeChips(boxes, map.getZoom() >= 5 ? Infinity : TOP_CHIPS);
       }
 
       // Cheap signature of every input the overlays derive from: per-flight
