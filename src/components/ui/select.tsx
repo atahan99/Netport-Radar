@@ -1,6 +1,6 @@
 import * as SelectPrimitive from '@radix-ui/react-select';
 import { Check, ChevronDown } from 'lucide-react';
-import type { ComponentProps } from 'react';
+import type { ComponentProps, ReactNode } from 'react';
 import { cn } from '@/lib/utils';
 
 const Select = SelectPrimitive.Root;
@@ -47,7 +47,7 @@ function SelectContent({
         <SelectPrimitive.Viewport
           className={cn(
             'p-1',
-            position === 'popper' && 'w-[var(--radix-select-trigger-width)]',
+            position === 'popper' && 'min-w-[var(--radix-select-trigger-width)]',
           )}
         >
           {children}
@@ -57,15 +57,18 @@ function SelectContent({
   );
 }
 
+// `trailing` renders after the label but outside ItemText, so it shows in the
+// list without being copied into the closed trigger.
 function SelectItem({
   className,
   children,
+  trailing,
   ...props
-}: ComponentProps<typeof SelectPrimitive.Item>) {
+}: ComponentProps<typeof SelectPrimitive.Item> & { trailing?: ReactNode }) {
   return (
     <SelectPrimitive.Item
       className={cn(
-        'relative flex cursor-pointer select-none items-center rounded-sm py-1.5 pl-7 pr-2 text-xs outline-none focus:bg-zinc-800 data-[disabled]:pointer-events-none data-[disabled]:opacity-50',
+        'relative flex cursor-pointer select-none items-center whitespace-nowrap rounded-sm py-1.5 pl-7 pr-2 text-xs outline-none focus:bg-zinc-800 data-[disabled]:pointer-events-none data-[disabled]:opacity-50',
         className,
       )}
       {...props}
@@ -76,6 +79,7 @@ function SelectItem({
         </SelectPrimitive.ItemIndicator>
       </span>
       <SelectPrimitive.ItemText>{children}</SelectPrimitive.ItemText>
+      {trailing}
     </SelectPrimitive.Item>
   );
 }
