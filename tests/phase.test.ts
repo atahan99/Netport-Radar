@@ -23,3 +23,13 @@ describe('PHASE_META / PHASE_ORDER', () => {
     }
   });
 });
+
+describe('progressCaption', () => {
+  it('describes the current phase instead of always saying Departing', async () => {
+    const { progressCaption } = await import('../src/lib/phase');
+    expect(progressCaption('landed', 'outbound')).toBe('Landed');
+    expect(progressCaption('cruise', 'outbound')).toBe('Departing');
+    expect(progressCaption('cruise', 'inbound')).toBe('Arriving');
+    expect(progressCaption('hold', 'outbound')).toBe('Holding');
+  });
+});
