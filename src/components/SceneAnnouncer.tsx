@@ -40,7 +40,7 @@ export default function SceneAnnouncer() {
 
   return (
     <>
-      <h1 className="sr-only">Netport Radar — live network connection map</h1>
+      <h1 className="sr-only">Netport-Radar — live network connection map</h1>
       <p className="sr-only">
         Your computer&apos;s live network connections are shown as aircraft on a{' '}
         {viewMode === '2d' ? '2D map' : '3D globe'}. The visualization is graphical; to browse and

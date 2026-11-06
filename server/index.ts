@@ -107,7 +107,7 @@ function lanIp(): string | null {
 async function main(): Promise<void> {
   if (!(await isPortFree(WS_PORT))) {
     console.error(
-      `\n[fatal] Port ${WS_PORT} is already in use — another netport-radar may be running.`,
+      `\n[fatal] Port ${WS_PORT} is already in use — another Netport-Radar may be running.`,
     );
     console.error(`        Free it and retry:  lsof -ti tcp:${WS_PORT} | xargs kill\n`);
     process.exit(1);
@@ -115,7 +115,7 @@ async function main(): Promise<void> {
 
   if (process.env.SERVE_DIST && !(await isPortFree(HTTP_PORT))) {
     console.error(
-      `\n[fatal] Port ${HTTP_PORT} is already in use — another netport-radar may be running.`,
+      `\n[fatal] Port ${HTTP_PORT} is already in use — another Netport-Radar may be running.`,
     );
     console.error(`        Free it and retry:  lsof -ti tcp:${HTTP_PORT} | xargs kill\n`);
     process.exit(1);
@@ -373,7 +373,7 @@ async function main(): Promise<void> {
   }
 
   console.log(
-    `netport-radar live · backend=${backend} dpi=${backendInfo.dpiMode} iface=${iface} ws=${WS_PORT}`,
+    `Netport-Radar live · backend=${backend} dpi=${backendInfo.dpiMode} iface=${iface} ws=${WS_PORT}`,
   );
 
   const shutdown = () => {

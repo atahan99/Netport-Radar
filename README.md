@@ -1,4 +1,4 @@
-# netport-radar
+# Netport-Radar
 
 A read-only network monitor that draws every connection on your machine as a
 flight: each TCP/UDP/ICMP flow takes off from your computer toward the remote
