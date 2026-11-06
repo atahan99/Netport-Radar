@@ -10,6 +10,8 @@ It is also a small exercise in running a privileged network tool safely: capture
 needs root, while the part that faces the network (a WebSocket server, an HTTP
 server and the protocol dissectors) does not.
 
+![Demo: live flights on the 2D map, selecting a flight, then the 3D globe](docs/demo.gif)
+
 | 2D map | 3D globe |
 | --- | --- |
 | ![2D map with live flights](docs/screenshot-map-2d.png) | ![3D globe view](docs/screenshot-globe-3d.png) |

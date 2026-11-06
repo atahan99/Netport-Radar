@@ -27,7 +27,10 @@ export const ringLng = (d: object) => (d as HomeAirport).lng;
 export const ringColor = (d: object) => () =>
   (d as { __color?: string }).__color ?? homeRingColor((d as HomeAirport).isVpn);
 
-export const labelText = (d: object) => (d as HomeAirport).label;
+// three-globe's label font only has ASCII glyphs ("Zürich" rendered as "Z?rich"),
+// so fold accents for the 3D labels. The 2D map keeps the original text.
+export const asciiLabel = (s: string) => s.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+export const labelText = (d: object) => asciiLabel((d as HomeAirport).label);
 export const labelColor = (d: object) => homeRingColor((d as HomeAirport).isVpn);
 
 export const pointLat = (d: object) => (d as DestDot).lat;
