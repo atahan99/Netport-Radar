@@ -144,8 +144,9 @@ export default function App() {
       </div>
       <Legend />
       <About />
-      {/* Bottom row: tabbed board · docked flight card */}
-      <div className="pointer-events-none absolute inset-x-0 bottom-4 z-10 flex items-end gap-2 px-4">
+      {/* Bottom row: tabbed board · docked flight card. Phones stack them
+          (card above, board below) so neither gets squeezed. */}
+      <div className="pointer-events-none absolute inset-x-0 bottom-4 z-10 flex items-end gap-2 px-4 max-[700px]:flex-col-reverse max-[700px]:items-stretch">
         <div className="pointer-events-auto shrink-0">
           <Board />
         </div>
