@@ -50,7 +50,7 @@ export function Board() {
   const homeOf = (f: Flight) => homeAirports.find((a) => a.id === f.homeAirportId);
 
   return (
-    <div className="hud-panel w-[360px] max-w-[calc(100vw-2rem)] rounded-xl border border-zinc-800 bg-black/85 backdrop-blur-sm max-[900px]:w-[300px]">
+    <div className="hud-panel w-[360px] max-w-[calc(100vw-2rem)] rounded-xl border border-zinc-800 bg-black/85 backdrop-blur-sm max-[900px]:w-[300px] max-[700px]:w-full">
       <div role="tablist" aria-label="Flight boards" className="flex border-b border-zinc-800 px-1">
         {TABS.map((t, i) => {
           const selected = t.id === tab;
@@ -120,7 +120,7 @@ export function Board() {
                 )}
               >
                 <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: f.liveryColor }} />
-                <span className="w-[66px] shrink-0 text-zinc-300">{f.id}</span>
+                <span className="w-[76px] shrink-0 whitespace-nowrap text-zinc-300">{f.id}</span>
                 <span className="flex-1 truncate text-zinc-400">
                   {f.process !== '—' && <span className="text-zinc-300">{f.process} · </span>}
                   {f.hostname}
