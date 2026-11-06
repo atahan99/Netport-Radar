@@ -26,6 +26,8 @@ import {
 } from '@/lib/map-markers';
 import { trailSegmentColor } from '@/lib/trail-color';
 import { mapRef } from '@/lib/view-refs';
+import { geoFlagLabel } from '@/lib/geo-display';
+import { placeChips, chipSize, type ChipBox } from '@/lib/chip-layout';
 import type { HomeAirport } from '@/types';
 
 // 2D trail sampling: arc resolution + gradient segment count per flight.
@@ -101,7 +103,6 @@ export default function MapView() {
       const filters = useFiltersStore.getState();
       const { mainQueue, dnsQueue } = getRenderQueueMemo(flights, filters);
       const rendered = [...mainQueue, ...dnsQueue];
-      const zoom = map.getZoom();
       const now = performance.now();
       const seen = new Set<string>();
 
@@ -136,10 +137,9 @@ export default function MapView() {
           entry.m.setLngLat([mLng, mLat]);
         }
         const selected = f.id === selectedFlightId;
-        // Chip declutter: unknown-geo flights never get chips (they stack on the
-        // shelf); mid zoom shows only the top throughput flights; high zoom all.
-        const showChip =
-          f.geoConfidence !== 'none' && (zoom >= 5 || (zoom >= 3 && topChips.has(f.id)));
+        // Chip declutter: placement (overlap + zoom caps) is decided in the
+        // 10Hz overlay pass; the selected flight always keeps its chip.
+        const showChip = topChips.has(f.id);
         paintMarker(entry, f, heading, selected, showChip, pose);
         seen.add(f.id);
       }
@@ -161,6 +161,31 @@ export default function MapView() {
       const filters = useFiltersStore.getState();
       const { mainQueue, dnsQueue } = getRenderQueueMemo(flights, filters);
       const rendered = [...mainQueue, ...dnsQueue];
+
+      // Chip declutter: unknown-geo flights never get chips (they stack on the
+      // shelf). Below zoom 3 no chips, mid zoom at most TOP_CHIPS, and at every
+      // zoom a chip that would overlap a higher-priority one is hidden. Runs
+      // before the signature skip: panning/zooming moves chips on screen.
+      const chipZoom = map.getZoom();
+      if (chipZoom < 3) {
+        topChips = new Set();
+      } else {
+        const boxes: ChipBox[] = [];
+        const ranked = rendered
+          .filter((f) => f.geoConfidence !== 'none' && markers.has(f.id))
+          .sort(
+            (a, b) =>
+              Number(b.id === selectedFlightId) - Number(a.id === selectedFlightId) ||
+              b.bytesPerSec - a.bytesPerSec,
+          );
+        for (const f of ranked) {
+          const last = markers.get(f.id)!.last;
+          const pt = map.project([last.lng, last.lat]);
+          // Chip sits above the plane icon (~10px) with a 4px gap.
+          boxes.push({ id: f.id, x: pt.x, y: pt.y - 14, ...chipSize(`${f.id} ${geoFlagLabel(f)}`) });
+        }
+        topChips = placeChips(boxes, chipZoom >= 5 ? Infinity : TOP_CHIPS);
+      }
 
       // Cheap signature of every input the overlays derive from: per-flight
       // id/phase/progress/color/isLan (membership changes change the id list),
@@ -244,12 +269,6 @@ export default function MapView() {
       const destSrc = map.getSource('dests') as maplibregl.GeoJSONSource | undefined;
       destSrc?.setData({ type: 'FeatureCollection', features: destFeatures } as FeatureCollection);
 
-      // Chip ranking for mid-zoom declutter: top throughput flights get chips.
-      const ranked = rendered
-        .filter((f) => f.geoConfidence !== 'none')
-        .sort((a, b) => b.bytesPerSec - a.bytesPerSec)
-        .slice(0, TOP_CHIPS);
-      topChips = new Set(ranked.map((f) => f.id));
 
       // Destination count badges (DOM, ~10 elements at 10Hz): counts for busy
       // dests; the unknown shelf gets a labeled "?? · N" so stacked unknown
