@@ -11,6 +11,7 @@ import { WS_FLUSH_MS, WS_MAX_PAYLOAD } from './config';
 import type {
   BackendInfo,
   ClientMessage,
+  Flight,
   FlightEvent,
   HomeAirport,
   ServerMessage,
@@ -92,7 +93,7 @@ export class WsHub {
 
   constructor(
     port: number,
-    private getInit: () => { homeAirports: HomeAirport[]; backend: BackendInfo },
+    private getInit: () => { homeAirports: HomeAirport[]; backend: BackendInfo; flights: Flight[] },
     opts: WsHubOpts,
   ) {
     this.wss = new WebSocketServer({
@@ -116,8 +117,7 @@ export class WsHub {
       // disconnect) must be handled or they bubble up as an uncaught exception
       // and can crash the process. The socket is torn down by ws either way.
       ws.on('error', () => {});
-      const { homeAirports, backend } = this.getInit();
-      this.sendTo(ws, { type: 'init', homeAirports, backend });
+      this.sendTo(ws, { type: 'init', ...this.getInit() });
       if (this.lastError) this.sendTo(ws, { type: 'error', ...this.lastError });
       ws.on('message', (data) => {
         const msg = parseClientMessage(data.toString());
@@ -142,8 +142,7 @@ export class WsHub {
   }
 
   broadcastInit(): void {
-    const { homeAirports, backend } = this.getInit();
-    this.broadcast({ type: 'init', homeAirports, backend });
+    this.broadcast({ type: 'init', ...this.getInit() });
   }
 
   reset(): void {

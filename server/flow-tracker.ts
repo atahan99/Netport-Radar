@@ -231,6 +231,16 @@ export class FlowTracker {
     // byTuple entry is untouched — the flight's literal tuple didn't change.
   }
 
+  // Every flight the client has been told about and that hasn't closed yet —
+  // the state a (re)connecting client needs.
+  snapshot(): Flight[] {
+    const out: Flight[] = [];
+    for (const flow of this.flows.values()) {
+      if (flow.opened && flow.closedAt === undefined) out.push({ ...flow.flight });
+    }
+    return out;
+  }
+
   clear(): void {
     this.flows.clear();
     this.byTuple.clear();

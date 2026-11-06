@@ -437,3 +437,17 @@ describe('geo confidence', () => {
     tracker.stop();
   });
 });
+
+describe('snapshot (init state for reconnecting clients)', () => {
+  it('includes opened flows only, and drops them once closed', async () => {
+    const { tracker } = setup();
+    tracker.ingest(pkt());
+    expect(tracker.snapshot()).toHaveLength(0); // still in the DNS hold, never announced
+    await vi.advanceTimersByTimeAsync(2500);
+    expect(tracker.snapshot().map((f) => f.dstIp)).toEqual(['8.8.8.8']);
+    tracker.ingest(pkt({ tcpFin: true }));
+    await vi.advanceTimersByTimeAsync(2600); // descent → landed
+    expect(tracker.snapshot()).toHaveLength(0);
+    tracker.stop();
+  });
+});

@@ -301,7 +301,8 @@ async function main(): Promise<void> {
     }
   })();
 
-  const ws = new WsHub(WS_PORT, () => ({ homeAirports, backend: backendInfo }), {
+  // `tracker` is created below; init only runs once clients connect.
+  const ws = new WsHub(WS_PORT, () => ({ homeAirports, backend: backendInfo, flights: tracker.snapshot() }), {
     host: BIND_HOST,
     token: TOKEN,
   });
