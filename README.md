@@ -80,8 +80,10 @@ to your user before it parses anything.
 
 Session logs stay in memory unless you set `NETPORT_SESSION_LOG=<dir>`.
 
-CI runs type checks, ESLint and the test suite on every push and PR, and fails on
-any high or critical advisory in a runtime dependency.
+CI runs type checks, ESLint and the unit tests on every push and PR, plus a
+headless-browser smoke test of the UI, CodeQL code scanning, and a gate on any
+high or critical advisory in a runtime dependency. Dependabot opens weekly,
+grouped update PRs.
 
 ## Quick start
 

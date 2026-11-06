@@ -6,6 +6,7 @@
 npm run check                 # tsc (app + server), eslint, vitest
 npx vitest run --coverage     # server/ and src/lib/ coverage
 npm audit --omit=dev          # runtime dependencies (CI fails on high/critical)
+npm run test:e2e              # browser smoke test (demo mode, headless Chromium)
 ```
 
 The unit tests cover the capture parsers (fixture strings, so CI needs no capture
@@ -79,7 +80,11 @@ loopback, multicast, and `*.in-addr.arpa` / `*.ip6.arpa` PTR lookups.
 
 ### Browser
 
-Run `npm run dev:demo`, or `npm run dev` with a live server, and check the views
+`npm run test:e2e` runs the Playwright smoke test (also in CI): map, board,
+toolbar, legend, flight card and the 3D globe in demo mode. To reuse an
+existing Chromium instead of downloading one, set `PW_CHROMIUM_PATH`.
+
+For manual checks, run `npm run dev:demo`, or `npm run dev` with a live server, and check the views
 in a browser at desktop and phone widths (375 px). A browser tab in the
 background throttles `requestAnimationFrame`, so check animation and throughput
 numbers in a foreground tab.

@@ -36,3 +36,4 @@ test-results
 
 # Runtime flight-log exports written to the repo root by the app
 *.ndjson
+playwright-report
