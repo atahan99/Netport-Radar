@@ -10,11 +10,10 @@
 
 import { execSync, fork, type ChildProcess } from 'child_process';
 import * as os from 'os';
-import http from 'http';
 import net from 'net';
 import { lookup } from 'dns/promises';
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs';
-import { join, extname } from 'path';
+import { writeFileSync, mkdirSync } from 'fs';
+import { join } from 'path';
 import type { BackendInfo, HomeAirport } from '../src/types';
 import {
   detectBackend,
@@ -27,6 +26,7 @@ import {
 } from './capture';
 import { FlowTracker } from './flow-tracker';
 import { WsHub } from './ws';
+import { serveDist } from './static';
 import { logEvent, exportNdjson, resetLog } from './logger';
 import {
   startProcessPolling,
@@ -150,42 +150,6 @@ async function resolvePrimaryHome(): Promise<HomeAirport> {
     /* offline */
   }
   return { id: 'primary', label: 'Local', lat: 0, lng: 0, ip: '', isVpn: false };
-}
-
-const MIME: Record<string, string> = {
-  '.html': 'text/html',
-  '.js': 'text/javascript',
-  '.css': 'text/css',
-  '.json': 'application/json',
-  '.svg': 'image/svg+xml',
-  '.png': 'image/png',
-  '.jpg': 'image/jpeg',
-  '.ico': 'image/x-icon',
-};
-
-function serveDist(): void {
-  const dir = join(import.meta.dirname, '..', 'dist');
-  if (!existsSync(dir)) {
-    console.warn('[serve] dist/ not found — run `npm run build` first');
-    return;
-  }
-  http
-    .createServer((req, res) => {
-      const rel = (req.url ?? '/').split('?')[0];
-      let file = join(dir, rel);
-      if (!existsSync(file) || rel === '/' || rel.endsWith('/')) file = join(dir, 'index.html');
-      try {
-        const data = readFileSync(file);
-        res.setHeader('Content-Type', MIME[extname(file)] ?? 'application/octet-stream');
-        res.end(data);
-      } catch {
-        res.statusCode = 404;
-        res.end('not found');
-      }
-    })
-    .listen(HTTP_PORT, BIND_HOST, () =>
-      console.log(`[serve] dist on http://localhost:${HTTP_PORT} (bound ${BIND_HOST})`),
-    );
 }
 
 function openBrowser(url: string): void {
@@ -554,7 +518,7 @@ async function main(): Promise<void> {
   };
 
   if (process.env.SERVE_DIST) {
-    serveDist();
+    serveDist(join(import.meta.dirname, '..', 'dist'), HTTP_PORT, BIND_HOST);
     // Local open works on any bind; the token rides the URL so the page can
     // hand it to the WS (only set for non-local binds).
     openBrowser(`http://localhost:${HTTP_PORT}${TOKEN ? `/?token=${TOKEN}` : ''}`);
