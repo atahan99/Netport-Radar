@@ -2,7 +2,7 @@
   "name": "netport-radar",
   "private": true,
   "version": "1.0.0",
-  "description": "Visualization-only local network monitor — your machine is an airport, every connection is a flight",
+  "description": "Visualization-only local network monitor \u2014 your machine is an airport, every connection is a flight",
   "license": "MIT",
   "type": "module",
   "scripts": {
@@ -64,5 +64,8 @@
     "typescript-eslint": "^8.59.2",
     "vite": "^8.0.12",
     "vitest": "^4.1.8"
+  },
+  "overrides": {
+    "minimatch": "^11.0.1"
   }
 }
