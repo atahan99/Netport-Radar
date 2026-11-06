@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react';
 import { useFlightsStore } from '@/store/flights';
 import { useFiltersStore } from '@/store/filters';
 import { THEME_BY_ID } from '@/lib/themes';
+import { liveSummary } from '@/lib/session-stats';
 
 const S = 120;
 
@@ -15,6 +16,11 @@ function hexToRgb(hex: string): [number, number, number] {
 export default function RadarHUD() {
   const ref = useRef<HTMLCanvasElement>(null);
   const accent = useFiltersStore((s) => THEME_BY_ID[s.theme]?.accent ?? '#00ff41');
+  // A string selector so the footer re-renders only when its text changes.
+  const footer = useFlightsStore((s) => {
+    const { active, top } = liveSummary(s.flights);
+    return top ? `${active} active · ${top}` : `${active} active`;
+  });
 
   // Mutable color the rAF draw loop reads each frame; updated on theme change
   // without tearing down the animation.
@@ -99,17 +105,19 @@ export default function RadarHUD() {
 
   return (
     <div
-      aria-hidden="true"
       className="relative rounded-xl border border-zinc-800 bg-black/85 p-1 backdrop-blur-sm"
       style={{ width: 152 }}
     >
-      <canvas ref={ref} className="mx-auto" style={{ width: S, height: S, display: 'block' }} />
+      <canvas ref={ref} aria-hidden="true" className="mx-auto" style={{ width: S, height: S, display: 'block' }} />
       {/* The app's wordmark lives here, in the accent color (the old centered one sat under the toolbar). */}
       <div
         className="pointer-events-none absolute inset-x-0 top-2 text-center text-[10px] font-semibold tracking-[0.3em]"
         style={{ color: 'var(--theme-accent, #a1a1aa)' }}
       >
         NETPORT·RADAR
+      </div>
+      <div className="truncate px-1 pb-0.5 text-center font-mono text-[10px] text-zinc-400" title={footer}>
+        {footer}
       </div>
     </div>
   );

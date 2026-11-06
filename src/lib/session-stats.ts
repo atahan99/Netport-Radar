@@ -40,3 +40,16 @@ const topN = (map: Map<string, { count: number; bytes: number }>): RankedItem[] 
     .map(([label, v]) => ({ label, count: v.count, bytes: v.bytes }))
     .sort((a, b) => b.bytes - a.bytes || b.count - a.count)
     .slice(0, TOP_N)
+
+// Radar footer: flows currently in the air and the app moving the most bytes
+// right now (not over the whole session, which SessionStats covers).
+export function liveSummary(flights: Flight[]): { active: number; top: string | null } {
+  let active = 0
+  let top: Flight | null = null
+  for (const f of flights) {
+    if (f.phase === 'landed') continue
+    active++
+    if (f.process !== '—' && (!top || f.bytesPerSec > top.bytesPerSec)) top = f
+  }
+  return { active, top: top && top.bytesPerSec > 0 ? top.process : null }
+}
