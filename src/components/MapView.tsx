@@ -80,6 +80,10 @@ export default function MapView() {
     // Chip declutter: ids allowed to show a chip at mid zoom (top throughput),
     // refreshed at overlay cadence.
     let topChips = new Set<string>();
+    let mapMoved = true; // set by map 'move'; chip layout reruns after a pan/zoom
+    map.on('move', () => {
+      mapMoved = true;
+    });
     // Overlay change-detection: signature of everything the overlay output
     // depends on. When it's unchanged (idle flights: hold/taxi/landed), skip
     // the whole rebuild — no GeoJSON, no setData, no re-tessellation.
@@ -167,10 +171,23 @@ export default function MapView() {
       const { mainQueue, dnsQueue } = getRenderQueueMemo(flights, filters);
       const rendered = [...mainQueue, ...dnsQueue];
 
+      // Cheap signature of every input the overlays derive from: per-flight
+      // id/phase/progress/color/isLan (membership changes change the id list),
+      // coarse bytesPerSec (chip ranking only cares about material changes),
+      // plus selection and trail style. Unchanged ⇒ nothing below would differ,
+      // so skip the rebuild, setData calls, badge/chip/pin updates entirely.
+      let sig = `${selectedFlightId ?? ''}|${filters.trailStyle}`;
+      for (const f of rendered) {
+        sig += `|${f.id};${f.phase};${liveProgress(f).toFixed(3)};${f.liveryColor};${f.isLan ? 1 : 0};${Math.round(f.bytesPerSec / 1024)}`;
+      }
+      const sigChanged = sig !== lastOverlaySig;
+      if (!sigChanged && !mapMoved) return; // idle: no projection, no rebuild
+      mapMoved = false;
+
       // Chip declutter: unknown-geo flights never get chips (they stack on the
       // shelf). Below zoom 5 at most TOP_CHIPS, and at every zoom a chip that
-      // would overlap a higher-priority one is hidden. Runs before the
-      // signature skip: panning/zooming moves chips on screen.
+      // would overlap a higher-priority one is hidden. Re-laid out when the
+      // flights changed or the map moved (chips move on screen with it).
       {
         const boxes: ChipBox[] = [];
         const ranked = rendered
@@ -189,16 +206,7 @@ export default function MapView() {
         topChips = placeChips(boxes, map.getZoom() >= 5 ? Infinity : TOP_CHIPS);
       }
 
-      // Cheap signature of every input the overlays derive from: per-flight
-      // id/phase/progress/color/isLan (membership changes change the id list),
-      // coarse bytesPerSec (chip ranking only cares about material changes),
-      // plus selection and trail style. Unchanged ⇒ nothing below would differ,
-      // so skip the rebuild, setData calls, badge/chip/pin updates entirely.
-      let sig = `${selectedFlightId ?? ''}|${filters.trailStyle}`;
-      for (const f of rendered) {
-        sig += `|${f.id};${f.phase};${liveProgress(f).toFixed(3)};${f.liveryColor};${f.isLan ? 1 : 0};${Math.round(f.bytesPerSec / 1024)}`;
-      }
-      if (sig === lastOverlaySig) return;
+      if (!sigChanged) return; // only the view moved: overlays are unchanged
       lastOverlaySig = sig;
 
       const arcFeatures: Feature[] = [];

@@ -19,3 +19,15 @@ export function fmtDur(ms: number): string {
   const s = Math.floor(ms / 1000);
   return `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
 }
+
+// What the DPI indicator shows: demo data, full tshark inspection, or
+// tcpdump's port-based guessing. `pending` is shown before the backend reports.
+export function dpiLabel(
+  backend: { dpiMode: 'full' | 'port-based' } | null,
+  demo: boolean,
+  pending: string,
+): string {
+  if (demo) return 'demo';
+  if (!backend) return pending;
+  return backend.dpiMode === 'full' ? 'tshark' : 'port-based';
+}

@@ -190,6 +190,7 @@ export default function GlobeView() {
     // changed since the last tick (all flights idle: taxi/hold/landed), skip
     // the state pushes so react-globe.gl doesn't re-tessellate the paths.
     let lastSig = '';
+    let lastSetSig = '';
     const tick = () => {
       if (document.hidden) return; // hidden tab: skip work, resume on visibility
       const { flights: fl, selectedFlightId } = useFlightsStore.getState();
@@ -217,11 +218,17 @@ export default function GlobeView() {
         }
         setDestData([...m.values()]);
       }
-      disposeUnusedMaterials(new Set(fl.map((f) => f.liveryColor)));
-      // Drop mesh-registry entries for flights three-globe has removed from the
-      // custom layer (it disposes the Object3D; we just release our reference).
-      const liveIds = new Set(renderedRef.current.map((f) => f.id));
-      for (const k of meshById.current.keys()) if (!liveIds.has(k)) meshById.current.delete(k);
+      // Housekeeping only when the flight set or its liveries changed (not
+      // every 90ms): free unused materials, and drop mesh-registry entries for
+      // flights three-globe removed (it disposes the Object3D; we drop the ref).
+      let setSig = '';
+      for (const f of fl) setSig += `${f.id}:${f.liveryColor},`;
+      if (setSig !== lastSetSig) {
+        lastSetSig = setSig;
+        disposeUnusedMaterials(new Set(fl.map((f) => f.liveryColor)));
+        const liveIds = new Set(renderedRef.current.map((f) => f.id));
+        for (const k of meshById.current.keys()) if (!liveIds.has(k)) meshById.current.delete(k);
+      }
     };
     const id = setInterval(tick, 90);
     tick();

@@ -3,8 +3,8 @@ import { useFlightsStore } from '@/store/flights';
 import { useFiltersStore } from '@/store/filters';
 import { globeRef, flightCardRef } from '@/lib/view-refs';
 import { flightWorldPos } from '@/lib/flight-pos';
+import { horizonMargin } from '@/lib/globe-horizon';
 
-const GLOBE_R = 100;
 
 // Leader line from the selected plane to the docked card. Updates its endpoints
 // every frame via direct SVG attribute writes (no per-frame React, and globeRef
@@ -17,6 +17,20 @@ export default function LeaderLine({ w, h }: { w: number; h: number }) {
 
   useEffect(() => {
     let raf = 0;
+    // The docked card rarely moves: measure it when it (re)mounts or at most
+    // twice a second, instead of forcing layout every frame.
+    let cardEl: HTMLElement | null = null;
+    let cardRect: DOMRect | null = null;
+    let measuredAt = 0;
+    const cardBox = (now: number): DOMRect | null => {
+      const el = flightCardRef.current;
+      if (el !== cardEl || now - measuredAt > 500) {
+        cardEl = el;
+        cardRect = el?.getBoundingClientRect() ?? null;
+        measuredAt = now;
+      }
+      return cardRect;
+    };
     const tick = () => {
       const svg = svgRef.current;
       const line = lineRef.current;
@@ -31,16 +45,8 @@ export default function LeaderLine({ w, h }: { w: number; h: number }) {
           const home = homeAirports.find((a) => a.id === f.homeAirportId);
           const p = flightWorldPos(f, home, performance.now());
           const sc = g.getScreenCoords(p.lat, p.lng, p.alt);
-          let visible = true;
-          try {
-            const P = g.getCoords(p.lat, p.lng, 0);
-            const C = g.camera().position;
-            visible = P.x * C.x + P.y * C.y + P.z * C.z > GLOBE_R * GLOBE_R;
-          } catch {
-            /* keep */
-          }
-          if (visible) {
-            const card = flightCardRef.current?.getBoundingClientRect();
+          if (horizonMargin(g, p.lat, p.lng) > 0) {
+            const card = cardBox(performance.now());
             const x2 = card ? card.left + card.width / 2 : w / 2;
             const y2 = card ? card.top : h - 16;
             line.setAttribute('x1', String(sc.x));
