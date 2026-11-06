@@ -22,3 +22,26 @@ jobs:
       # Runtime dependencies only: the shipped code must have no high/critical
       # advisories. Dev-toolchain advisories are reviewed on dependency bumps.
       - run: npm audit --omit=dev --audit-level=high
+
+  # Browser smoke test: demo mode in headless Chromium (map, board, toolbar,
+  # legend, flight card, 3D globe). Catches breaks unit tests can't see, like a
+  # renderer worker failing to load.
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:e2e
+        env:
+          CI: 'true'
+      - if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-traces
+          path: test-results/
+          retention-days: 7
