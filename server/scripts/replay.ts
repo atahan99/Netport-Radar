@@ -290,6 +290,7 @@ function runReplay(scheduled: Scheduled[], speed: number, loop: boolean, port: n
       type: 'init',
       homeAirports: [DEFAULT_HOME],
       backend: BACKEND,
+      flights: [],
     }
     ws.send(JSON.stringify(init))
   })

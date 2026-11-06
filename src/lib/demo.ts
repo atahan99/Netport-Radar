@@ -13,6 +13,7 @@ import type {
 } from '@/types';
 import { useFlightsStore } from '@/store/flights';
 import { arcProgressLive, STORE_PUSH_MS } from '@/lib/anim';
+import { LANDED_TTL_MS } from '@/config';
 import { useConnectionStore } from '@/store/connection';
 import { liveryColor, normalizeProcess } from './livery';
 
@@ -234,11 +235,18 @@ export function useDemoFlights(enabled = true): void {
       // Per-frame arcProgress → animation channel; React store pushed at 10Hz or
       // on a phase/membership change (mirrors the live client).
       let transition = false;
-      for (const sf of flights) {
+      const wall = Date.now();
+      for (let i = flights.length - 1; i >= 0; i--) {
+        const sf = flights[i];
         if (!sf.done) {
           const prevPhase = sf.phase;
           advance(sf, now);
           if (sf.phase !== prevPhase) transition = true;
+        } else if (wall - (sf.landedAt ?? wall) > LANDED_TTL_MS) {
+          // Same linger rule as the live client; without it the list only grows.
+          flights.splice(i, 1);
+          arcProgressLive.delete(sf.id);
+          continue;
         }
         arcProgressLive.set(sf.id, sf.arcProgress);
       }
@@ -290,6 +298,7 @@ export function useDemoFlights(enabled = true): void {
       cancelAnimationFrame(raf);
       clearTimeout(spawnTimer);
       window.removeEventListener('keydown', onKey);
+      arcProgressLive.clear();
     };
   }, [enabled, setHomeAirports, setFlights]);
 }

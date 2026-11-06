@@ -1,10 +1,10 @@
 // src/lib/live.ts
-// useLiveFlights() — WebSocket client for the Phase 3 capture backend.
+// useLiveFlights() — WebSocket client for the capture backend.
 // Server owns phase + metrics; the client animates arcProgress (visual) from
 // the phase + elapsed time, mirroring the demo's rAF loop.
 
 import { useEffect } from 'react';
-import type { ClientMessage, Flight, FlightEvent, ServerMessage } from '@/types';
+import type { ClientMessage } from '@/types';
 import { useFlightsStore } from '@/store/flights';
 import { useConnectionStore } from '@/store/connection';
 import { useBackendStore, FATAL_CODES } from '@/store/backend';
@@ -12,11 +12,7 @@ import { useToastStore } from '@/store/toasts';
 import { useDiagnosticsStore } from '@/store/diagnostics';
 import { arcProgressLive, STORE_PUSH_MS } from '@/lib/anim';
 import { CRUISE_MS, CRUISE_TARGET, DESCENT_MS, LANDED_TTL_MS } from '@/config';
-
-interface LiveFlight extends Flight {
-  phaseStartedAt: number; // client clock (performance.now) when current phase began
-  cruiseBase: number; // arcProgress when cruise/descent began (for resume)
-}
+import { LiveState, parseServerMessage, type LiveFlight } from '@/lib/live-state';
 
 // Control handle — live while the socket is open so the UI (MetricsStrip) can
 // request an interface switch / log export.
@@ -42,8 +38,8 @@ export function useLiveFlights(enabled: boolean): void {
   useEffect(() => {
     if (!enabled) return;
 
-    const flights: LiveFlight[] = [];
-    const byId = new Map<string, LiveFlight>();
+    const state = new LiveState();
+    const flights = state.flights;
     const conn = useConnectionStore.getState();
     const backend = useBackendStore.getState();
     let ws: WebSocket | null = null;
@@ -54,38 +50,11 @@ export function useLiveFlights(enabled: boolean): void {
     let pushPending = false; // force an immediate store push (membership/phase change)
     let closed = false;
 
-    const applyEvent = (e: FlightEvent, now: number) => {
-      if (e.event === 'opened') {
-        const lf: LiveFlight = { ...e.flight, phaseStartedAt: now, cruiseBase: 0 };
-        byId.set(lf.id, lf);
-        flights.push(lf);
-        pushPending = true; // new flight → show it without waiting for the 10Hz tick
-        return;
-      }
-      const lf = byId.get(e.id);
-      if (!lf) return;
-      if (e.event === 'updated') Object.assign(lf, e.patch);
-      else if (e.event === 'hostname') {
-        lf.hostname = e.hostname;
-        if (e.sni) lf.sni = e.sni;
-        lf.hostnameResolved = true;
-      } else if (e.event === 'phase') {
-        if (lf.phase !== e.phase) {
-          lf.phaseStartedAt = now;
-          lf.cruiseBase = lf.arcProgress;
-          pushPending = true; // phase drives boards/card — keep it snappy
-        }
-        lf.phase = e.phase;
-      } else if (e.event === 'closed') {
-        lf.bytesTotal = e.bytesTotal;
-        lf.durationMs = e.durationMs;
-        lf.landedAt = Date.now();
-        if (lf.phase !== 'landed') {
-          lf.phase = 'landed';
-          lf.phaseStartedAt = now;
-          pushPending = true;
-        }
-      }
+    const resetFlights = () => {
+      state.clear();
+      arcProgressLive.clear();
+      useFlightsStore.getState().selectFlight(null);
+      pushPending = true;
     };
 
     const animate = (lf: LiveFlight, now: number) => {
@@ -100,30 +69,32 @@ export function useLiveFlights(enabled: boolean): void {
     };
 
     const loop = (now: number) => {
-      // Per-frame: animate arcProgress into the animation channel (the views read
-      // this every frame for smooth motion). The React store is pushed at 10Hz.
-      for (const lf of flights) {
-        animate(lf, now);
-        arcProgressLive.set(lf.id, lf.arcProgress);
-      }
-      if (now - lastPrune > 2000) {
-        lastPrune = now;
-        for (let i = flights.length - 1; i >= 0; i--) {
-          const lf = flights[i];
-          if (lf.phase === 'landed' && now - lf.phaseStartedAt > LANDED_TTL_MS) {
-            byId.delete(lf.id);
-            arcProgressLive.delete(lf.id);
-            flights.splice(i, 1);
-            pushPending = true; // membership change
+      // Reschedule first-class: one bad frame must not stop the animation for good.
+      try {
+        // Per-frame: animate arcProgress into the animation channel (the views
+        // read this every frame for smooth motion). The store is pushed at 10Hz.
+        for (const lf of flights) {
+          animate(lf, now);
+          arcProgressLive.set(lf.id, lf.arcProgress);
+        }
+        if (now - lastPrune > 2000) {
+          lastPrune = now;
+          for (let i = flights.length - 1; i >= 0; i--) {
+            const lf = flights[i];
+            if (lf.phase === 'landed' && now - lf.phaseStartedAt > LANDED_TTL_MS) {
+              arcProgressLive.delete(state.remove(i).id);
+              pushPending = true; // membership change
+            }
           }
         }
+        if (pushPending || now - lastPush >= STORE_PUSH_MS) {
+          pushPending = false;
+          lastPush = now;
+          setFlights(flights.slice());
+        }
+      } finally {
+        raf = requestAnimationFrame(loop);
       }
-      if (pushPending || now - lastPush >= STORE_PUSH_MS) {
-        pushPending = false;
-        lastPush = now;
-        setFlights(flights.slice());
-      }
-      raf = requestAnimationFrame(loop);
     };
     raf = requestAnimationFrame(loop);
 
@@ -133,33 +104,40 @@ export function useLiveFlights(enabled: boolean): void {
       // Token only present when the server is bound beyond loopback (it rides
       // the page URL from the server's printed link).
       const token = new URLSearchParams(location.search).get('token');
-      ws = new WebSocket(`ws://${location.hostname}:8090${token ? `/?token=${encodeURIComponent(token)}` : ''}`);
-      ws.onopen = () => {
+      const sock = new WebSocket(
+        `ws://${location.hostname}:8090${token ? `/?token=${encodeURIComponent(token)}` : ''}`,
+      );
+      ws = sock;
+      // Every handler checks it still belongs to the current socket: a socket
+      // replaced by "Try now" must not flip state, clobber liveControl, or
+      // schedule another reconnect.
+      const current = () => ws === sock;
+      sock.onopen = () => {
+        if (!current()) return;
         conn.setReconnecting(false);
         backend.setOnline(true);
         useDiagnosticsStore.getState().setWsState('connected');
-        liveControl.send = (m) => ws?.send(JSON.stringify(m));
+        liveControl.send = (m) => sock.send(JSON.stringify(m));
       };
-      ws.onmessage = (ev) => {
-        let msg: ServerMessage;
-        try {
-          msg = JSON.parse(ev.data as string) as ServerMessage;
-        } catch {
-          return;
-        }
+      sock.onmessage = (ev) => {
+        if (!current()) return;
+        const msg = parseServerMessage(ev.data);
+        if (!msg) return;
         const now = performance.now();
         if (msg.type === 'init') {
+          // Authoritative snapshot: drop whatever we had (stale after an outage,
+          // or colliding ids after a server restart) and start from the server's.
+          resetFlights();
+          state.seed(msg.flights, now);
           setHomeAirports(msg.homeAirports);
           backend.setBackend(msg.backend);
           backend.setError(null);
         } else if (msg.type === 'home_update') {
           setHomeAirports(msg.homeAirports);
         } else if (msg.type === 'batch') {
-          for (const e of msg.events) applyEvent(e, now);
+          for (const e of msg.events) if (state.apply(e, now)) pushPending = true;
         } else if (msg.type === 'reset') {
-          flights.length = 0;
-          byId.clear();
-          useFlightsStore.getState().selectFlight(null);
+          resetFlights();
         } else if (msg.type === 'log') {
           downloadNdjson(msg.ndjson);
         } else if (msg.type === 'error') {
@@ -176,12 +154,14 @@ export function useLiveFlights(enabled: boolean): void {
           }
         }
       };
-      ws.onerror = () => {
+      sock.onerror = () => {
+        if (!current()) return;
         useDiagnosticsStore.getState().recordWsError('WebSocket connection error');
         useToastStore.getState().push('WebSocket connection error — retrying…', 'warn');
-        ws?.close();
+        sock.close();
       };
-      ws.onclose = (ev) => {
+      sock.onclose = (ev) => {
+        if (!current()) return;
         backend.setOnline(false);
         liveControl.send = () => {};
         useDiagnosticsStore.getState().recordWsClose(ev.code, ev.reason);
@@ -193,6 +173,7 @@ export function useLiveFlights(enabled: boolean): void {
         }
         if (closed) return;
         conn.setReconnecting(true);
+        clearTimeout(retry);
         retry = setTimeout(connect, 3000);
       };
     };
@@ -202,7 +183,9 @@ export function useLiveFlights(enabled: boolean): void {
     liveReconnect.now = () => {
       if (closed) return;
       clearTimeout(retry);
-      if (ws && ws.readyState !== WebSocket.OPEN) ws.close();
+      const old = ws;
+      ws = null; // detach first so the old socket's late onclose is ignored
+      old?.close();
       connect();
     };
 
@@ -212,7 +195,10 @@ export function useLiveFlights(enabled: boolean): void {
       liveReconnect.now = () => {};
       cancelAnimationFrame(raf);
       clearTimeout(retry);
-      ws?.close();
+      const old = ws;
+      ws = null;
+      old?.close();
+      arcProgressLive.clear();
     };
   }, [enabled, setFlights, setHomeAirports]);
 }

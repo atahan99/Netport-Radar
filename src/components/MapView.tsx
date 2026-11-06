@@ -675,13 +675,16 @@ export default function MapView() {
         frameRaf = requestAnimationFrame(frame);
         return;
       }
-      frameParity = !frameParity;
-      if (frameParity) updateMarkers();
-      if (now - lastOverlay >= OVERLAY_MS) {
-        lastOverlay = now;
-        updateOverlays();
+      try {
+        frameParity = !frameParity;
+        if (frameParity) updateMarkers();
+        if (now - lastOverlay >= OVERLAY_MS) {
+          lastOverlay = now;
+          updateOverlays();
+        }
+      } finally {
+        frameRaf = requestAnimationFrame(frame); // one bad frame must not stop the map
       }
-      frameRaf = requestAnimationFrame(frame);
     };
     frameRaf = requestAnimationFrame(frame);
 

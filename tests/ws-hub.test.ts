@@ -10,7 +10,7 @@ let portSeq = 18100;
 const hubs: WsHub[] = [];
 function makeHub(token: string | null): { hub: WsHub; port: number } {
   const port = portSeq++;
-  const hub = new WsHub(port, () => ({ homeAirports: HOME, backend: BACKEND }), {
+  const hub = new WsHub(port, () => ({ homeAirports: HOME, backend: BACKEND, flights: [] }), {
     host: '127.0.0.1',
     token,
   });

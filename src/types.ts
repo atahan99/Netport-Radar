@@ -134,7 +134,10 @@ export type FlightEvent =
   | { event: 'hostname'; id: string; hostname: string; sni?: string };
 
 export type ServerMessage =
-  | { type: 'init'; homeAirports: HomeAirport[]; backend: BackendInfo }
+  // init is authoritative: the client replaces its flight list with `flights`
+  // (every open flow), so reconnects and server restarts never leave stale or
+  // duplicate flights behind.
+  | { type: 'init'; homeAirports: HomeAirport[]; backend: BackendInfo; flights: Flight[] }
   | { type: 'batch'; events: FlightEvent[] }
   | { type: 'home_update'; homeAirports: HomeAirport[] }
   | { type: 'reset' }
