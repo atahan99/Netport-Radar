@@ -50,15 +50,7 @@ export default function About() {
           A read-only network monitor: every connection on this machine is drawn as a flight to the remote IP&apos;s
           country. Capture and inspection run locally and never touch the traffic.
         </p>
-        <a
-          href={REPO_URL}
-          target="_blank"
-          rel="noreferrer"
-          className="mt-2 inline-flex items-center gap-1.5 font-mono text-[11px] text-zinc-200 underline-offset-2 hover:underline"
-        >
-          <GitHubMark />
-          {REPO_URL.replace('https://', '')} ↗
-        </a>
+
 
         <div className="mb-1 mt-3 font-mono text-[10px] uppercase tracking-wide text-zinc-500">Data &amp; sources</div>
         <ul className="space-y-1">
@@ -74,7 +66,16 @@ export default function About() {
 
         <div className="mt-3 flex items-center justify-between border-t border-zinc-800 pt-2 text-[11px] text-zinc-500">
           <span>MIT licensed</span>
-          <span>{APP_NAME}</span>
+          <a
+            href={REPO_URL}
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex items-center gap-1.5 text-zinc-300 underline-offset-2 hover:underline"
+            aria-label={`${APP_NAME} on GitHub`}
+          >
+            <GitHubMark />
+            {APP_NAME}
+          </a>
         </div>
       </div>
     </>
