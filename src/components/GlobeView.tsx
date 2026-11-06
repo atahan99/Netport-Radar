@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import * as THREE from 'three';
 import Globe, { type GlobeMethods } from 'react-globe.gl';
 import { useFlightsStore } from '@/store/flights';
+import { flightWorldPos } from '@/lib/flight-pos';
 import { useFiltersStore } from '@/store/filters';
 import { getRenderQueueMemo } from '@/lib/render-queue';
 import { flightEndpoints } from '@/lib/arc';
@@ -15,7 +16,7 @@ import {
   rgba,
 } from '@/lib/globe-color';
 import { globeMaterialFor } from '@/lib/globe-material';
-import { correctedLngOffset, orientPlaneMesh } from '@/lib/mesh-orientation';
+import { orientPlaneMesh } from '@/lib/mesh-orientation';
 import { interpolateArc, arcPoints, greatCircleKm, arcAltitude } from '@/lib/interpolate';
 import {
   createPlaneMesh,
@@ -28,7 +29,6 @@ import {
   updateStrobes,
 } from '@/lib/globe-meshes';
 import { trailPathColors } from '@/lib/trail-color';
-import { lifecyclePose } from '@/lib/lifecycle';
 import { liveProgress } from '@/lib/anim';
 import { reducedMotion } from '@/lib/motion';
 import { showTip, hideTip, flightTipText } from '@/lib/tooltip';
@@ -331,29 +331,14 @@ export default function GlobeView() {
   const updateMesh = useCallback(
     (o: THREE.Object3D, f: Flight, g: GlobeApi, now: number, progress: number) => {
       const home = homeById(f.homeAirportId);
-      const ep = flightEndpoints(home, f);
-      // LAN flights orbit home (pinned), never fly out to a destination.
-      const p =
-        f.isLan && home
-          ? { lat: home.lat, lng: home.lng, heading: 0 }
-          : interpolateArc(ep.startLat, ep.startLng, ep.endLat, ep.endLng, progress);
-      const km = f.isLan ? 0 : greatCircleKm(ep.startLat, ep.startLng, ep.endLat, ep.endLng);
-      const alt = f.isLan ? 0.03 : arcAltitude(km) * Math.sin(progress * Math.PI) + 0.006;
-      const pose = lifecyclePose(f, now);
-      const oLat = pose.dLat;
-      const oLng = correctedLngOffset(pose.dLng, p.lat);
-      const c = g.getCoords(p.lat + oLat, p.lng + oLng, alt);
+      const { lat, lng, alt, pose } = flightWorldPos(f, home, now, progress);
+      const c = g.getCoords(lat, lng, alt);
       _pos.set(c.x, c.y, c.z);
       o.position.copy(_pos);
       // Forward hint uses the pose slightly in the future so orbiting planes
       // (hold circles / LAN) face along their actual motion, not just the arc.
-      const np = interpolateArc(ep.startLat, ep.startLng, ep.endLat, ep.endLng, Math.min(1, progress + 0.01));
-      const pose2 = lifecyclePose(f, now + 130);
-      const nc = g.getCoords(
-        np.lat + pose2.dLat,
-        np.lng + correctedLngOffset(pose2.dLng, p.lat),
-        alt,
-      );
+      const next = flightWorldPos(f, home, now + 130, Math.min(1, progress + 0.01));
+      const nc = g.getCoords(next.lat, next.lng, alt);
       _fwdHint.set(nc.x, nc.y, nc.z);
       // Bank into the turn while circling (hold / LAN orbit).
       const banking = !reducedMotion() && (f.phase === 'hold' || (f.isLan && f.phase !== 'landed'));
@@ -426,18 +411,7 @@ export default function GlobeView() {
       let best: Flight | null = null;
       let bestD = radiusPx * radiusPx;
       for (const f of renderedRef.current) {
-        const home = homeById(f.homeAirportId);
-        const ep = flightEndpoints(home, f);
-        const progress = liveProgress(f);
-        const p =
-          f.isLan && home
-            ? { lat: home.lat, lng: home.lng }
-            : interpolateArc(ep.startLat, ep.startLng, ep.endLat, ep.endLng, progress);
-        const km = f.isLan ? 0 : greatCircleKm(ep.startLat, ep.startLng, ep.endLat, ep.endLng);
-        const alt = f.isLan ? 0.03 : arcAltitude(km) * Math.sin(progress * Math.PI) + 0.006;
-        const pose = lifecyclePose(f, now);
-        const lat = p.lat + pose.dLat;
-        const lng = p.lng + correctedLngOffset(pose.dLng, p.lat);
+        const { lat, lng, alt } = flightWorldPos(f, homeById(f.homeAirportId), now);
         // Skip planes on the far side of the globe — they project to valid
         // screen coords but are hidden behind the sphere.
         const c = g.getCoords(lat, lng, alt);

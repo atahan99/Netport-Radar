@@ -2,9 +2,7 @@ import { useEffect, useRef } from 'react';
 import { useFlightsStore } from '@/store/flights';
 import { useFiltersStore } from '@/store/filters';
 import { globeRef, flightCardRef } from '@/lib/view-refs';
-import { flightEndpoints } from '@/lib/arc';
-import { interpolateArc } from '@/lib/interpolate';
-import { liveProgress } from '@/lib/anim';
+import { flightWorldPos } from '@/lib/flight-pos';
 
 const GLOBE_R = 100;
 
@@ -31,9 +29,8 @@ export default function LeaderLine({ w, h }: { w: number; h: number }) {
         const f = sel && docked ? flights.find((x) => x.id === sel) : undefined;
         if (f) {
           const home = homeAirports.find((a) => a.id === f.homeAirportId);
-          const ep = flightEndpoints(home, f);
-          const p = interpolateArc(ep.startLat, ep.startLng, ep.endLat, ep.endLng, liveProgress(f));
-          const sc = g.getScreenCoords(p.lat, p.lng, 0.02);
+          const p = flightWorldPos(f, home, performance.now());
+          const sc = g.getScreenCoords(p.lat, p.lng, p.alt);
           let visible = true;
           try {
             const P = g.getCoords(p.lat, p.lng, 0);

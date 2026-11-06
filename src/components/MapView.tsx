@@ -6,9 +6,10 @@ import { useFiltersStore } from '@/store/filters';
 import { getRenderQueueMemo } from '@/lib/render-queue';
 import { interpolateArc, arcPoints, greatCircleKm } from '@/lib/interpolate';
 import { flightEndpoints } from '@/lib/arc';
-import { correctedLngOffset, markerHeadingDeg } from '@/lib/mesh-orientation';
+import { markerHeadingDeg } from '@/lib/mesh-orientation';
 import { liveProgress } from '@/lib/anim';
-import { lifecyclePose, type Pose } from '@/lib/lifecycle';
+import { type Pose } from '@/lib/lifecycle';
+import { flightWorldPos } from '@/lib/flight-pos';
 import { reducedMotion } from '@/lib/motion';
 import { showTip, hideTip, flightTipText } from '@/lib/tooltip';
 import { THEME_BY_ID, type Theme } from '@/lib/themes';
@@ -337,20 +338,7 @@ export default function MapView() {
       for (const f of rendered) {
         const home = homeAirports.find((a) => a.id === f.homeAirportId);
         if (!home) continue;
-        const ep = flightEndpoints(home, f);
-        const prog = liveProgress(f); // per-frame animated value (not the 10Hz snapshot)
-        // LAN flights orbit the home airport — pin them to home (don't interpolate a
-        // destination arc, which would fly them off to wherever dst landed).
-        const pos = f.isLan
-          ? { lat: home.lat, lng: home.lng, heading: 0 }
-          : interpolateArc(ep.startLat, ep.startLng, ep.endLat, ep.endLng, prog);
-
-        // Lifecycle pose adds an orbit offset (hold-circle / LAN orbit) around the
-        // projected position; the lng offset is widened by 1/cos(lat) so the circle
-        // stays roughly round away from the equator.
-        const pose = lifecyclePose(f, now);
-        const mLat = pos.lat + pose.dLat;
-        const mLng = pos.lng + correctedLngOffset(pose.dLng, pos.lat);
+        const { lat: mLat, lng: mLng, heading, pose } = flightWorldPos(f, home, now);
 
         let entry = markers.get(f.id);
         if (!entry) {
@@ -382,7 +370,7 @@ export default function MapView() {
         // shelf); mid zoom shows only the top throughput flights; high zoom all.
         const showChip =
           f.geoConfidence !== 'none' && (zoom >= 5 || (zoom >= 3 && topChips.has(f.id)));
-        paintMarker(entry, f, pos.heading, selected, showChip, pose);
+        paintMarker(entry, f, heading, selected, showChip, pose);
         seen.add(f.id);
       }
 
