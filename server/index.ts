@@ -12,7 +12,7 @@ import { execSync, fork, type ChildProcess } from 'child_process';
 import * as os from 'os';
 import net from 'net';
 import { lookup } from 'dns/promises';
-import { writeFileSync, mkdirSync, mkdtempSync, chownSync, rmSync } from 'fs';
+import { writeFileSync, mkdirSync, mkdtempSync, chownSync, rmSync, existsSync, statSync } from 'fs';
 import { randomBytes } from 'crypto';
 import { join } from 'path';
 import type { BackendInfo, HomeAirport } from '../src/types';
@@ -239,25 +239,21 @@ function dropPrivileges(target: DropTarget): void {
       `[security] dropped to uid=${target.uid} gid=${target.gid}; capture runs in the root broker.`,
     );
   } catch (e) {
-    // The broker is already forked; if the drop fails we keep running as before
-    // (servers root) rather than aborting — no worse than the pre-change state.
-    console.error('[security] privilege drop failed — continuing as root:', e);
+    // Fail closed: the network-facing servers must never keep running as root.
+    // Exiting also stops the broker (it exits when the IPC channel closes).
+    console.error('[security] privilege drop failed — refusing to run the servers as root:', e);
+    console.error('[security] fix sudo (SUDO_UID/GID/USER) or opt out with NETPORT_NO_PRIVDROP=1.');
+    process.exit(1);
   }
 }
 
-function assertPrivilegesDropped(brokered: boolean, wsHub: WsHub): void {
+function assertPrivilegesDropped(brokered: boolean): void {
   if (typeof process.getuid !== 'function') return;
   const uid = process.getuid();
   console.log(`[security] effective uid=${uid}${brokered ? ' (brokered; capture in root child)' : ''}`);
-  if (!brokered) return;
-  if (uid === 0) {
-    console.error(
-      '[security] brokered run still executing as root after dropPrivileges — WS/HTTP must not stay root.',
-    );
-    wsHub.error(
-      'privilege_drop_failed',
-      'Server still running as root after privilege drop — fix sudo (SUDO_UID/GID) or use NETPORT_NO_PRIVDROP=1 intentionally.',
-    );
+  if (brokered && uid === 0) {
+    console.error('[security] still root after the privilege drop — exiting.');
+    process.exit(1);
   }
 }
 
@@ -506,7 +502,7 @@ async function main(): Promise<void> {
     sendBroker({ t: 'init', backend, iface, sockPath, nonce, dropUser: target.user });
     sendProcessBoost = () => sendBroker({ t: 'boost' }); // the broker owns lsof
     dropPrivileges(target); // everything below this line runs as the invoking user
-    assertPrivilegesDropped(true, ws);
+    assertPrivilegesDropped(true);
     return {
       switchTo: (next) => sendBroker({ t: 'switch', iface: next }),
       stop: () => {
@@ -523,7 +519,7 @@ async function main(): Promise<void> {
   const capture: CaptureControl = dropTarget
     ? await startBrokeredCapture(dropTarget)
     : startInlineCapture();
-  if (!dropTarget) assertPrivilegesDropped(false, ws);
+  if (!dropTarget) assertPrivilegesDropped(false);
 
   ws.onClient = (msg, reply) => {
     if (msg.type === 'export') {
@@ -548,7 +544,11 @@ async function main(): Promise<void> {
   };
 
   if (process.env.SERVE_DIST) {
-    serveDist(join(import.meta.dirname, '..', 'dist'), HTTP_PORT, BIND_HOST);
+    const distDir = join(import.meta.dirname, '..', 'dist');
+    serveDist(distDir, HTTP_PORT, BIND_HOST);
+    if (existsSync(distDir) && statSync(distDir).uid === 0 && process.getuid?.() !== 0) {
+      console.warn('[serve] dist/ is owned by root (built under sudo). Fix: sudo chown -R "$USER" dist');
+    }
     // Local open works on any bind; the token rides the URL so the page can
     // hand it to the WS (only set for non-local binds).
     openBrowser(`http://localhost:${HTTP_PORT}${TOKEN ? `/?token=${TOKEN}` : ''}`);
@@ -564,16 +564,15 @@ async function main(): Promise<void> {
     capture.stop();
     tracker.stop();
     ws.stop();
-    // Flush the session log to disk (the master plan promised this on clean close).
-    const ndjson = exportNdjson();
-    if (ndjson) {
-      // Keep session logs out of the repo root: write under plans/session-logs/
-      // (gitignored). Created on demand.
-      const dir = join(process.cwd(), 'plans', 'session-logs');
-      const file = join(dir, `netport-radar-${new Date().toISOString().replace(/[:.]/g, '-')}.ndjson`);
+    // Opt-in: the log is a full record of who you talked to, so it only hits
+    // disk when NETPORT_SESSION_LOG names a directory.
+    const logDir = process.env.NETPORT_SESSION_LOG;
+    const ndjson = logDir ? exportNdjson() : '';
+    if (logDir && ndjson) {
+      const file = join(logDir, `netport-radar-${new Date().toISOString().replace(/[:.]/g, '-')}.ndjson`);
       try {
-        mkdirSync(dir, { recursive: true });
-        writeFileSync(file, ndjson + '\n');
+        mkdirSync(logDir, { recursive: true, mode: 0o700 });
+        writeFileSync(file, ndjson + '\n', { mode: 0o600 });
         console.log(`\n[log] session written to ${file}`);
       } catch (e) {
         console.error('[log] failed to write session log:', e);

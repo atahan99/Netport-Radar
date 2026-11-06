@@ -12,6 +12,7 @@
     "server": "tsx server/index.ts",
     "dev:server": "tsx watch server/index.ts",
     "start": "vite build && SERVE_DIST=1 tsx server/index.ts",
+    "serve": "SERVE_DIST=1 tsx server/index.ts",
     "typecheck:server": "tsc -p tsconfig.server.json",
     "lint": "eslint .",
     "test": "vitest run",
