@@ -16,7 +16,8 @@ export type ThemeName =
   | 'amber'
   | 'blueprint'
   | 'arctic'
-  | 'satellite';
+  | 'satellite'
+  | 'night';
 
 // Per-layer recolor applied by layer type to the dark-matter style.
 export interface MapRecolor {
@@ -71,6 +72,7 @@ const SATELLITE_STYLE: StyleSpecification = {
 
 const EARTH_DARK = '/textures/earth-dark.jpg';
 const EARTH_BLUE = '/textures/earth-blue-marble.jpg';
+const EARTH_NIGHT = '/textures/earth-night.jpg'; // NASA Black Marble (public domain)
 
 export const THEMES: Theme[] = [
   {
@@ -172,6 +174,16 @@ export const THEMES: Theme[] = [
     globeImageUrl: EARTH_BLUE, // real NASA blue-marble earth
     bg: '#01030a',
     mapStyle: SATELLITE_STYLE, // real Esri imagery
+  },
+  {
+    id: 'night',
+    label: 'Night',
+    accent: '#ffb347',
+    atmosphere: '#6fa8ff',
+    globeTint: '#ffffff',
+    globeImageUrl: EARTH_NIGHT, // city lights; photo path (no land/water remap)
+    bg: '#000000',
+    mapStyle: DARK, // no night-lights vector basemap: 2D matches Midnight
   },
 ];
 
