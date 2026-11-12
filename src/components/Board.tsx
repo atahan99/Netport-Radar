@@ -5,6 +5,7 @@ import { locateFlight } from '@/lib/locate';
 import { PHASE_META } from '@/lib/phase';
 import { cn } from '@/lib/utils';
 import { geoFlagLabel } from '@/lib/geo-display';
+import { fmtBytes, fmtDur } from '@/lib/format';
 import type { Flight } from '@/types';
 
 const LANDED_LINGER_MS = 10_000;
@@ -12,7 +13,10 @@ const MAX_ROWS = 40;
 const TABS: { id: BoardTab; label: string }[] = [
   { id: 'outbound', label: 'Departures' },
   { id: 'inbound', label: 'Arrivals' },
+  { id: 'log', label: 'Log' },
 ];
+const IN_COLOR = '#22c55e';
+const clock = (ms: number) => new Date(ms).toLocaleTimeString('en-GB', { hour12: false });
 
 // Spoken label for a row — the visible content is terse mono, so spell it out.
 function rowLabel(f: Flight, vpn: boolean): string {
@@ -44,7 +48,9 @@ export function Board() {
   const lists: Record<BoardTab, Flight[]> = {
     outbound: visible.filter((f) => f.direction === 'outbound').slice(0, MAX_ROWS),
     inbound: visible.filter((f) => f.direction === 'inbound').slice(0, MAX_ROWS),
+    log: visible.slice(0, MAX_ROWS),
   };
+  const isLog = tab === 'log';
   const rows = lists[tab];
   const activeLabel = TABS.find((t) => t.id === tab)!.label;
   // Roving tabindex: one tab stop for the list (the selected row, else the first).
@@ -85,10 +91,14 @@ export function Board() {
         })}
       </div>
       <div role="tabpanel" id="board-panel" aria-labelledby={`board-tab-${tab}`}>
-        <div className="hud-scroll max-h-[196px] overflow-y-auto py-1" role="listbox" aria-label={activeLabel}>
+        <div
+          className={cn('hud-scroll overflow-y-auto py-1', isLog ? 'max-h-[240px]' : 'max-h-[196px]')}
+          role="listbox"
+          aria-label={activeLabel}
+        >
           {rows.length === 0 && (
             <div className="px-3 py-3 text-center font-mono text-[10px] text-zinc-500">
-              no {tab} flights
+              no {isLog ? '' : `${tab} `}flights
             </div>
           )}
           {rows.map((f) => {
@@ -119,30 +129,72 @@ export function Board() {
                 className={cn(
                   'flex w-full items-center gap-2 px-3 py-1.5 text-left font-mono text-[11px] outline-none hover:bg-zinc-900/70 focus-visible:bg-zinc-900 focus-visible:ring-1 focus-visible:ring-zinc-600',
                   selectedId === f.id && 'bg-zinc-900',
-                  landed && 'text-zinc-500 line-through opacity-70',
+                  landed && !isLog && 'text-zinc-500 line-through opacity-70',
+                  isLog && 'border-l-2 text-[10px] leading-snug',
+                  isLog && landed && 'opacity-60',
                 )}
+                style={
+                  isLog
+                    ? {
+                        borderColor: f.direction === 'inbound' ? IN_COLOR : 'var(--theme-accent, #4285f4)',
+                      }
+                    : undefined
+                }
               >
-                <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: f.liveryColor }} />
-                <span className="w-[76px] shrink-0 whitespace-nowrap text-zinc-300">{f.id}</span>
-                <span className="min-w-0 flex-1 truncate text-zinc-400">
-                  {f.process !== '—' && <span className="text-zinc-300">{f.process} · </span>}
-                  {f.hostname}
-                </span>
-                {/* Fixed-width trailing columns (country · phase · VPN slot) so
+                {isLog ? (
+                  // Full detail, wrapped rather than truncated.
+                  <span className="min-w-0 flex-1">
+                    <span className="flex flex-wrap items-baseline gap-x-1.5">
+                      <span className="text-zinc-500">{clock(f.startedAt)}</span>
+                      <span
+                        style={{
+                          color: f.direction === 'inbound' ? IN_COLOR : 'var(--theme-accent, #4285f4)',
+                        }}
+                      >
+                        {f.direction === 'inbound' ? 'in' : 'out'}
+                      </span>
+                      <span className="text-zinc-200">
+                        {geo} {f.city ? `${f.city}, ` : ''}
+                        {f.country}
+                      </span>
+                      <span className="ml-auto text-zinc-500">{f.phase}</span>
+                    </span>
+                    <span className="block break-all text-zinc-400">
+                      {f.hostname && f.hostname !== f.dstIp ? `${f.hostname} · ` : ''}
+                      {f.dstIp}:{f.port} · {f.detectedProtocol}
+                      {f.org && f.org !== 'Unknown' ? ` · ${f.org}` : ''}
+                      {f.process !== '—' ? ` · ${f.process}` : ''}
+                    </span>
+                    <span className="block text-zinc-500">
+                      ↑ {fmtBytes(f.bytesTx)} · ↓ {fmtBytes(f.bytesRx)} · {fmtDur(f.durationMs)}
+                      {home?.isVpn ? ' · VPN' : ''}
+                    </span>
+                  </span>
+                ) : (
+                  <>
+                    <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: f.liveryColor }} />
+                    <span className="w-[76px] shrink-0 whitespace-nowrap text-zinc-300">{f.id}</span>
+                    <span className="min-w-0 flex-1 truncate text-zinc-400">
+                      {f.process !== '—' && <span className="text-zinc-300">{f.process} · </span>}
+                      {f.hostname}
+                    </span>
+                    {/* Fixed-width trailing columns (country · phase · VPN slot) so
                     flags and statuses line up whether or not a row has a badge. */}
-                <span className="flex w-[46px] shrink-0 items-center gap-1 font-mono text-[10px]">
-                  {geo}
-                  {/* A flag emoji alone is hard to read; ~CC / ?? already show the code. */}
-                  {geo === f.countryFlag && <span className="text-zinc-400">{f.country}</span>}
-                </span>
-                <span className={cn('w-[60px] shrink-0 text-right', PHASE_META[f.phase].textClass)}>
-                  {f.phase.toUpperCase()}
-                </span>
-                <span className="flex w-[30px] shrink-0 justify-end">
-                  {home?.isVpn && (
-                    <span className="rounded bg-violet-900/60 px-1 text-[10px] text-violet-300">VPN</span>
-                  )}
-                </span>
+                    <span className="flex w-[46px] shrink-0 items-center gap-1 font-mono text-[10px]">
+                      {geo}
+                      {/* A flag emoji alone is hard to read; ~CC / ?? already show the code. */}
+                      {geo === f.countryFlag && <span className="text-zinc-400">{f.country}</span>}
+                    </span>
+                    <span className={cn('w-[60px] shrink-0 text-right', PHASE_META[f.phase].textClass)}>
+                      {f.phase.toUpperCase()}
+                    </span>
+                    <span className="flex w-[30px] shrink-0 justify-end">
+                      {home?.isVpn && (
+                        <span className="rounded bg-violet-900/60 px-1 text-[10px] text-violet-300">VPN</span>
+                      )}
+                    </span>
+                  </>
+                )}
               </button>
             );
           })}

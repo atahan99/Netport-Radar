@@ -35,6 +35,24 @@ describe('<Board> tabs', () => {
     expect(screen.getAllByRole('option')).toHaveLength(2);
   });
 
+  it('log tab lists both directions with full detail', () => {
+    useFlightsStore.setState({
+      flights: [
+        makeFlight({ id: 'OUT-1', direction: 'outbound', dstIp: '9.9.9.9', org: 'Quad9', process: 'curl' }),
+        makeFlight({ id: 'IN-1', direction: 'inbound', dstIp: '8.8.4.4' }),
+      ],
+    });
+    useFiltersStore.setState({ boardTab: 'log' });
+    render(<Board />);
+    const rows = screen.getAllByRole('option');
+    expect(rows).toHaveLength(2);
+    const text = rows.map((r) => r.textContent).join(' ');
+    expect(text).toContain('9.9.9.9:443');
+    expect(text).toContain('Quad9');
+    expect(text).toContain('curl');
+    expect(text).toContain('8.8.4.4');
+  });
+
   it('switches tabs with the arrow keys', () => {
     render(<Board />);
     fireEvent.keyDown(screen.getByRole('tab', { name: /departures/i }), { key: 'ArrowRight' });
