@@ -16,6 +16,30 @@ describe('aggregateSessionStats', () => {
     expect(stats.totalFlights).toBe(3)
     expect(stats.totalBytes).toBe(1700)
   })
+
+  it('ranks orgs (skipping LAN/unknown) and splits direction and tx/rx', () => {
+    const stats = aggregateSessionStats([
+      makeFlight({ org: 'Spotify AB', bytesTotal: 900, bytesTx: 100, bytesRx: 800 }),
+      makeFlight({ org: 'Unknown', bytesTotal: 5000, direction: 'inbound', bytesTx: 5000 }),
+      makeFlight({ org: 'Home Router', isLan: true, bytesTotal: 7000 }),
+    ])
+    expect(stats.orgs).toEqual([{ label: 'Spotify AB', count: 1, bytes: 900 }])
+    expect(stats).toMatchObject({ out: 2, in: 1, bytesTx: 5100, bytesRx: 800 })
+  })
+})
+
+describe('flights store retire', () => {
+  it('keeps only the newest RETIRED_CAP flights', async () => {
+    const { useFlightsStore, RETIRED_CAP } = await import('../src/store/flights')
+    const batch = Array.from({ length: RETIRED_CAP }, () => makeFlight())
+    useFlightsStore.getState().retire(batch)
+    const last = makeFlight()
+    useFlightsStore.getState().retire([last])
+    const { retired } = useFlightsStore.getState()
+    expect(retired).toHaveLength(RETIRED_CAP)
+    expect(retired.at(-1)).toBe(last)
+    expect(retired[0]).toBe(batch[1])
+  })
 })
 
 describe('liveSummary', () => {
