@@ -25,6 +25,7 @@ import { globeRef as sharedGlobeRef, type GlobeApi } from '@/lib/view-refs';
 import LeaderLine from '@/components/LeaderLine';
 import { positionPlaneMesh, pickFlightAt } from '@/lib/globe-planes';
 import { trailWidth } from '@/lib/trail-width';
+import { aggregateRoutes, type Route } from '@/lib/routes';
 import {
   asF,
   pathPointAlt,
@@ -62,6 +63,16 @@ const DEFAULT_ALT = 1.7;
 // Stable empty list so react-globe.gl doesn't rebuild polygons every render when
 // the theme has no country layer (Midnight / Satellite keep the photo earth).
 const NO_POLYGONS: object[] = [];
+const NO_ITEMS: object[] = [];
+
+// Grouped-view arc accessors (module-level: identity-stable).
+const asR = (d: object) => d as Route;
+const arcStartLat = (d: object) => asR(d).home.lat;
+const arcStartLng = (d: object) => asR(d).home.lng;
+const arcEndLat = (d: object) => asR(d).lat;
+const arcEndLng = (d: object) => asR(d).lng;
+// arcStroke is in degrees (tube width), not pixels.
+const arcStroke = (d: object) => 0.15 + 0.15 * trailWidth(asR(d).bytesPerSec, false);
 
 
 export default function GlobeView() {
@@ -72,6 +83,8 @@ export default function GlobeView() {
   const filters = useFiltersStore(useShallow(selectFilterData));
   const themeId = useFiltersStore((s) => s.theme);
   const theme = THEME_BY_ID[themeId];
+  const aggregate = useFiltersStore((s) => s.aggregate);
+  const arcColor = useCallback(() => theme.accent, [theme]);
   const idleTimer = useRef<number | undefined>(undefined);
   const rendererRef = useRef<{ forceContextLoss(): void } | null>(null);
 
@@ -185,6 +198,7 @@ export default function GlobeView() {
 
   const [trailData, setTrailData] = useState<TrailDatum[]>([]);
   const [destData, setDestData] = useState<DestDot[]>([]);
+  const [routeData, setRouteData] = useState<Route[]>([]);
   useEffect(() => {
     // Signature of everything trailData/destData depend on. When it hasn't
     // changed since the last tick (all flights idle: taxi/hold/landed), skip
@@ -193,11 +207,11 @@ export default function GlobeView() {
     let lastSetSig = '';
     const tick = () => {
       if (document.hidden) return; // hidden tab: skip work, resume on visibility
-      const { flights: fl, selectedFlightId } = useFlightsStore.getState();
+      const { flights: fl, selectedFlightId, homeAirports: homes } = useFlightsStore.getState();
       const ft = useFiltersStore.getState();
       const q = getRenderQueueMemo(fl, ft);
       const set = [...q.mainQueue, ...q.dnsQueue];
-      let sig = `${selectedFlightId ?? ''}|${ft.trailStyle}`;
+      let sig = `${selectedFlightId ?? ''}|${ft.trailStyle}|${ft.aggregate}|${homes.length}`;
       for (const f of set) {
         sig += `|${f.id},${f.phase},${liveProgress(f).toFixed(3)},${f.liveryColor},${f.isLan ? 1 : 0},${f.country},${trailWidth(f.bytesPerSec, f.id === selectedFlightId)}`;
       }
@@ -217,6 +231,7 @@ export default function GlobeView() {
           else m.set(f.country, { country: f.country, lat: f.dstLat, lng: f.dstLng, count: 1 });
         }
         setDestData([...m.values()]);
+        setRouteData(ft.aggregate ? aggregateRoutes(set, homes) : []);
       }
       // Housekeeping only when the flight set or its liveries changed (not
       // every 90ms): free unused materials, and drop mesh-registry entries for
@@ -481,7 +496,7 @@ export default function GlobeView() {
         onZoom={onZoom}
         onGlobeReady={onGlobeReady}
         /* trails (throttled) — VPN dashed */
-        pathsData={trailData}
+        pathsData={aggregate ? NO_ITEMS : trailData}
         pathPoints={pathPoints}
         pathPointAlt={pathPointAlt}
         pathColor={pathColor}
@@ -489,6 +504,19 @@ export default function GlobeView() {
         pathDashLength={pathDashLength}
         pathDashGap={pathDashGap}
         pathTransitionDuration={0}
+        /* grouped view: one animated arc per home → country route */
+        arcsData={routeData}
+        arcStartLat={arcStartLat}
+        arcStartLng={arcStartLng}
+        arcEndLat={arcEndLat}
+        arcEndLng={arcEndLng}
+        arcColor={arcColor}
+        arcStroke={arcStroke}
+        arcAltitudeAutoScale={0.25}
+        arcDashLength={0.4}
+        arcDashGap={0.2}
+        arcDashAnimateTime={reducedMotion() ? 0 : 2000}
+        arcsTransitionDuration={0}
         /* home airports + destination beacon (selected flight) */
         ringsData={ringData}
         ringLat={ringLat}
@@ -514,11 +542,11 @@ export default function GlobeView() {
         pointRadius={pointRadius}
         onPointClick={onPointClick}
         /* plane meshes (every frame) */
-        customLayerData={rendered}
+        customLayerData={aggregate ? NO_ITEMS : rendered}
         customThreeObject={customThreeObject}
         customThreeObjectUpdate={customThreeObjectUpdate}
       />
-      <LeaderLine w={size.w} h={size.h} />
+      {!aggregate && <LeaderLine w={size.w} h={size.h} />}
     </div>
   );
 }

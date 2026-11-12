@@ -100,6 +100,7 @@ export default function App() {
         if (k === 'f') return f.toggleFilterDrawer();
         if (k === 'l') return f.toggleLegend();
         if (k === 'g') return f.setViewMode(f.viewMode === '2d' ? '3d' : '2d');
+        if (k === 'a') return f.toggleAggregate();
       }
       // [ / ] step backward / forward through the on-screen flights — keyboard
       // access to planes (the canvas markers aren't individually focusable).

@@ -29,6 +29,7 @@ import { mapRef } from '@/lib/view-refs';
 import { geoFlagLabel } from '@/lib/geo-display';
 import { placeChips, chipSize, type ChipBox } from '@/lib/chip-layout';
 import { trailWidth } from '@/lib/trail-width';
+import { aggregateRoutes } from '@/lib/routes';
 import type { HomeAirport } from '@/types';
 
 // 2D trail sampling: arc resolution + gradient segment count per flight.
@@ -106,7 +107,8 @@ export default function MapView() {
       const { flights, homeAirports, selectedFlightId } = useFlightsStore.getState();
       const filters = useFiltersStore.getState();
       const { mainQueue, dnsQueue } = getRenderQueueMemo(flights, filters);
-      const rendered = [...mainQueue, ...dnsQueue];
+      // Grouped view draws no planes; the loop below then removes every marker.
+      const rendered = filters.aggregate ? [] : [...mainQueue, ...dnsQueue];
       const now = performance.now();
       const seen = new Set<string>();
 
@@ -176,7 +178,7 @@ export default function MapView() {
       // coarse bytesPerSec (chip ranking only cares about material changes),
       // plus selection and trail style. Unchanged ⇒ nothing below would differ,
       // so skip the rebuild, setData calls, badge/chip/pin updates entirely.
-      let sig = `${selectedFlightId ?? ''}|${filters.trailStyle}`;
+      let sig = `${selectedFlightId ?? ''}|${filters.trailStyle}|${filters.aggregate}|${filters.theme}`;
       for (const f of rendered) {
         sig += `|${f.id};${f.phase};${liveProgress(f).toFixed(3)};${f.liveryColor};${f.isLan ? 1 : 0};${Math.round(f.bytesPerSec / 1024)}`;
       }
@@ -219,7 +221,7 @@ export default function MapView() {
         const ep = flightEndpoints(home, f);
         const prog = liveProgress(f);
 
-        if (!f.isLan && f.phase !== 'taxi' && f.phase !== 'landed') {
+        if (!filters.aggregate && !f.isLan && f.phase !== 'taxi' && f.phase !== 'landed') {
           // FR24-style trail: split the traveled arc into segments whose opacity
           // ramps quadratically toward the plane (transparent at origin), since
           // MapLibre line-gradient can't be data-driven per feature.
@@ -262,6 +264,22 @@ export default function MapView() {
           countryAgg.set(f.country, { lng: f.dstLng, lat: f.dstLat, count: 0 });
         }
         countryAgg.get(f.country)!.count++;
+      }
+
+      if (filters.aggregate) {
+        // One full arc per home → country route, width by its combined rate.
+        const accent = (THEME_BY_ID[filters.theme] ?? THEME_BY_ID.midnight).accent;
+        for (const r of aggregateRoutes(rendered, homeAirports)) {
+          const km = greatCircleKm(r.home.lat, r.home.lng, r.lat, r.lng);
+          arcFeatures.push({
+            type: 'Feature',
+            properties: { color: accent, vpn: r.home.isVpn, op: 0.8, w: trailWidth(r.bytesPerSec, false) },
+            geometry: {
+              type: 'LineString',
+              coordinates: arcPoints(r.home.lat, r.home.lng, r.lat, r.lng, 1, km < 2000 ? TRAIL_STEPS_SHORT : TRAIL_STEPS_2D),
+            },
+          });
+        }
       }
 
       const arcSrc = map.getSource('arcs') as maplibregl.GeoJSONSource | undefined;

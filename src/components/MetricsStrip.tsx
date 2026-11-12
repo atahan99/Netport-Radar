@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Menu, Map as MapIcon, Globe, Download, CircleHelp, Info, Stethoscope } from 'lucide-react';
+import { Menu, Map as MapIcon, Globe, Download, CircleHelp, Info, Stethoscope, Waypoints } from 'lucide-react';
 import { downloadFile } from '@/lib/utils';
 import { legendSeen, markLegendSeen } from '@/lib/legend-hint';
 import { useFlightsStore } from '@/store/flights';
@@ -88,17 +88,21 @@ function StripButton({
   onClick,
   label,
   shortcut,
+  pressed,
   children,
 }: {
   onClick: () => void;
   label: string;
   shortcut?: string;
+  pressed?: boolean;
   children: React.ReactNode;
 }) {
   return (
     <button
       onClick={onClick}
       aria-label={label}
+      aria-pressed={pressed}
+      style={pressed ? { borderColor: 'var(--theme-accent, #4285f4)', color: 'var(--theme-accent, #4285f4)' } : undefined}
       aria-keyshortcuts={shortcut}
       title={shortcut ? `${label} (${shortcut})` : label}
       className="flex h-7 w-7 items-center justify-center rounded-md border border-zinc-700 text-zinc-300 hover:bg-zinc-800 hover:text-zinc-50 [&_svg]:h-3.5 [&_svg]:w-3.5"
@@ -114,6 +118,8 @@ export default function MetricsStrip() {
 
   const viewMode = useFiltersStore((s) => s.viewMode);
   const setViewMode = useFiltersStore((s) => s.setViewMode);
+  const aggregate = useFiltersStore((s) => s.aggregate);
+  const toggleAggregate = useFiltersStore((s) => s.toggleAggregate);
   const toggleFilterDrawer = useFiltersStore((s) => s.toggleFilterDrawer);
   const toggleLegend = useFiltersStore((s) => s.toggleLegend);
   const toggleAbout = useFiltersStore((s) => s.toggleAbout);
@@ -261,6 +267,9 @@ export default function MetricsStrip() {
       <div className="flex shrink-0 items-center gap-1.5">
         <StripButton onClick={() => setViewMode(viewMode === '2d' ? '3d' : '2d')} label="2D / 3D" shortcut="G">
           {viewMode === '2d' ? <MapIcon /> : <Globe />}
+        </StripButton>
+        <StripButton onClick={toggleAggregate} label="Group by country" shortcut="A" pressed={aggregate}>
+          <Waypoints />
         </StripButton>
         <span className="mx-0.5 h-5 w-px bg-zinc-700" aria-hidden="true" />
         <div className="relative">

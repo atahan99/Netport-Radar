@@ -130,9 +130,16 @@ Environment variables, passed through sudo (`sudo NETPORT_BIND=0.0.0.0 npm run s
 
 Click a plane or a row on the Departures/Arrivals board to open its flight card;
 `[` and `]` step through flights and `Esc` closes panels or clears the selection.
-`F` opens filters, `L` the legend, and `G` switches between 2D and 3D. The
-toolbar also has seven themes and log/diagnostics export. The boards work with the keyboard
-and screen readers, and `prefers-reduced-motion` is honored.
+`F` opens filters, `L` the legend, and `G` switches between 2D and 3D. `A`
+switches to the grouped view: one arc per destination country instead of a
+plane per connection. The board's Log tab lists every connection with its IP,
+port, protocol, org, app, bytes and duration. The session panel keeps running
+totals for the whole session, and its "Where it goes" list ranks the companies
+receiving your traffic (it needs `NETPORT_MMDB_ASN`). Click a destination dot to
+turn the panel into that country's summary. The toolbar also has eight themes
+(Night shows the globe's city lights) and log/diagnostics export. The boards
+work with the keyboard and screen readers, and `prefers-reduced-motion` is
+honored.
 
 ## Troubleshooting
 
