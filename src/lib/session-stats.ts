@@ -12,6 +12,10 @@ export const aggregateSessionStats = (flights: Flight[]) => {
   const byProcess = new Map<string, { count: number; bytes: number }>()
   const byCountry = new Map<string, { count: number; bytes: number }>()
   const byProtocol = new Map<string, { count: number; bytes: number }>()
+  const byOrg = new Map<string, { count: number; bytes: number }>()
+  let out = 0
+  let bytesTx = 0
+  let bytesRx = 0
 
   for (const f of flights) {
     const proc = f.process && f.process !== '—' ? f.process : 'unknown'
@@ -19,12 +23,22 @@ export const aggregateSessionStats = (flights: Flight[]) => {
     const country = f.country || '??'
     bump(byCountry, country, f.bytesTotal)
     bump(byProtocol, f.detectedProtocol, f.bytesTotal)
+    // LAN peers and unresolved ASNs would only add noise to "where it goes".
+    if (!f.isLan && f.org && f.org !== 'Unknown') bump(byOrg, f.org, f.bytesTotal)
+    if (f.direction === 'outbound') out++
+    bytesTx += f.bytesTx
+    bytesRx += f.bytesRx
   }
 
   return {
     talkers: topN(byProcess),
     countries: topN(byCountry),
     protocols: topN(byProtocol),
+    orgs: topN(byOrg),
+    out,
+    in: flights.length - out,
+    bytesTx,
+    bytesRx,
     totalFlights: flights.length,
     totalBytes: flights.reduce((s, f) => s + f.bytesTotal, 0),
   }
