@@ -3,7 +3,7 @@ import { THEMES, THEME_BY_ID, type ThemeName } from '../src/lib/themes';
 
 describe('themes', () => {
   it('exposes 7 themes, indexable by id', () => {
-    expect(THEMES).toHaveLength(7);
+    expect(THEMES).toHaveLength(8);
     for (const t of THEMES) expect(THEME_BY_ID[t.id]).toBe(t);
   });
 

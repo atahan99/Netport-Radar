@@ -84,13 +84,17 @@ export function useLiveFlights(enabled: boolean): void {
         }
         if (now - lastPrune > 2000) {
           lastPrune = now;
+          const gone: LiveFlight[] = [];
           for (let i = flights.length - 1; i >= 0; i--) {
             const lf = flights[i];
             if (lf.phase === 'landed' && now - lf.phaseStartedAt > LANDED_TTL_MS) {
-              arcProgressLive.delete(state.remove(i).id);
+              const removed = state.remove(i);
+              arcProgressLive.delete(removed.id);
+              gone.push(removed);
               pushPending = true; // membership change
             }
           }
+          useFlightsStore.getState().retire(gone);
         }
         if (pushPending || now - lastPush >= STORE_PUSH_MS) {
           pushPending = false;

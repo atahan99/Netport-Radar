@@ -8,7 +8,7 @@ export type Direction = 'both' | 'outbound' | 'inbound';
 export type AirportFilter = 'all' | 'primary' | 'vpn';
 export type ViewMode = '2d' | '3d';
 export type CardAnchorMode = 'anchored' | 'docked';
-export type BoardTab = 'outbound' | 'inbound';
+export type BoardTab = 'outbound' | 'inbound' | 'log';
 
 export type BooleanFilterKey =
   | 'showHTTPS'

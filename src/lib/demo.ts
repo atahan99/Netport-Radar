@@ -248,6 +248,7 @@ export function useDemoFlights(enabled = true): void {
           // Same linger rule as the live client; without it the list only grows.
           flights.splice(i, 1);
           arcProgressLive.delete(sf.id);
+          useFlightsStore.getState().retire([sf]);
           continue;
         }
         arcProgressLive.set(sf.id, sf.arcProgress);
