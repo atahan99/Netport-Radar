@@ -53,6 +53,7 @@ export interface FilterState {
   viewMode: ViewMode;
   theme: ThemeName;
   trailStyle: TrailStyle; // livery colors vs FR24 altitude rainbow
+  aggregate: boolean; // grouped view: one arc per destination country, no planes
   filterDrawerOpen: boolean;
   legendOpen: boolean;
   aboutOpen: boolean;
@@ -70,6 +71,7 @@ export interface FilterState {
   setViewMode: (m: ViewMode) => void;
   setTheme: (t: ThemeName) => void;
   setTrailStyle: (t: TrailStyle) => void;
+  toggleAggregate: () => void;
   toggleCardAnchor: () => void; // flips the mode for the active viewMode
   toggleFilterDrawer: () => void;
   setLegend: (open: boolean) => void;
@@ -152,6 +154,7 @@ export const useFiltersStore = create<FilterState>()(
       legendOpen: false,
       aboutOpen: false,
       boardTab: 'outbound',
+      aggregate: false,
 
       toggle: (key) => set((s) => ({ [key]: !s[key] }) as Partial<FilterState>),
       setDnsDensity: (dnsDensity) => set({ dnsDensity }),
@@ -162,6 +165,7 @@ export const useFiltersStore = create<FilterState>()(
       setViewMode: (viewMode) => set({ viewMode }),
       setTheme: (theme) => set({ theme }),
       setTrailStyle: (trailStyle) => set({ trailStyle }),
+      toggleAggregate: () => set((s) => ({ aggregate: !s.aggregate })),
       toggleCardAnchor: () =>
         set((s) =>
           s.viewMode === '2d'
@@ -203,6 +207,7 @@ export const useFiltersStore = create<FilterState>()(
         viewMode: s.viewMode,
         theme: s.theme,
         trailStyle: s.trailStyle,
+        aggregate: s.aggregate,
         cardAnchor2d: s.cardAnchor2d,
         cardAnchor3d: s.cardAnchor3d,
         boardTab: s.boardTab,
