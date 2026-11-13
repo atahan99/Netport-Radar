@@ -19,6 +19,10 @@ keeping them apart.
 | --- | --- |
 | ![Flight card detail](docs/screenshot-flight-card.png) | ![Filter drawer](docs/screenshot-filters.png) |
 
+| Grouped view, Night theme | Log tab and country summary |
+| --- | --- |
+| ![Grouped view: one arc per destination country on the Night globe](docs/screenshot-grouped-night.png) | ![Log tab with full connection detail and the US country summary](docs/screenshot-log-country.png) |
+
 ## Security design
 
 ### Threat model
